@@ -1,0 +1,61 @@
+.loading-title {
+  left: 80px;
+  top: 60px;
+  font-size: 48px;
+  font-weight: 700;
+}
+
+.loading-mode {
+  left: 80px;
+  top: 120px;
+  font-size: 28px;
+}
+
+.loading-game {
+  left: 80px;
+  top: 165px;
+  font-size: 24px;
+}
+
+.loading-casters {
+  right: 80px;
+  top: 60px;
+  font-size: 24px;
+  text-align: right;
+  width: 560px;
+}
+
+.loading-blue-name {
+  left: 120px;
+  bottom: 140px;
+  font-size: 36px;
+  font-weight: 700;
+}
+
+.loading-red-name {
+  right: 120px;
+  bottom: 140px;
+  font-size: 36px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.loading-blue-logo {
+  position: absolute;
+  left: 120px;
+  bottom: 40px;
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  z-index: 2;
+}
+
+.loading-red-logo {
+  position: absolute;
+  right: 120px;
+  bottom: 40px;
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  z-index: 2;
+}

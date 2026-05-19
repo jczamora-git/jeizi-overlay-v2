@@ -1,0 +1,32 @@
+.legacy-draft-overlay {
+  background: transparent !important;
+}
+
+.legacy-draft-overlay .overlay-frame {
+  position: absolute;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}
+
+.legacy-draft-overlay .overlay-data-layer {
+  position: absolute;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.legacy-draft-placeholder {
+  position: absolute;
+  left: 80px;
+  top: 60px;
+  font-size: 32px;
+  font-weight: 700;
+  color: #ffffff;
+}
