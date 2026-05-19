@@ -47,6 +47,7 @@ app.get("/api/current-overlay-data", async (req, res) => {
     let blueTeam = null;
     let redTeam = null;
     let game = null;
+    let latestFinishedGame = null;
     let map = null;
     let draftActions = [];
     let casters = [];
@@ -71,6 +72,12 @@ app.get("/api/current-overlay-data", async (req, res) => {
         [match.id]
       );
       game = gameRows[0] || null;
+
+      const [finishedGameRows] = await pool.query(
+        "SELECT * FROM games WHERE match_id = ? AND status = 'finished' AND winner_team_id IS NOT NULL ORDER BY game_no DESC, updated_at DESC, id DESC LIMIT 1",
+        [match.id]
+      );
+      latestFinishedGame = finishedGameRows[0] || null;
 
       if (game && game.map_id) {
         const [mapRows] = await pool.query("SELECT * FROM maps WHERE id = ?", [
@@ -109,6 +116,7 @@ app.get("/api/current-overlay-data", async (req, res) => {
       blue_team: blueTeam,
       red_team: redTeam,
       game,
+      latest_finished_game: latestFinishedGame,
       map,
       draft_actions: draftActions,
       casters,

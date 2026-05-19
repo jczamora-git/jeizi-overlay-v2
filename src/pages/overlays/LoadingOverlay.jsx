@@ -5,6 +5,18 @@ import { resolveAssetUrl } from "../../utils/assetUrl";
 import "../../styles/overlays/overlay-base.css";
 import "../../styles/overlays/loading-overlay.css";
 
+const getTeamLogo = (team) =>
+  team?.logo_url ||
+  team?.logo ||
+  team?.image_url ||
+  team?.image ||
+  team?.team_logo_url ||
+  team?.team_logo ||
+  "";
+
+const getTeamShortName = (team, fallback) =>
+  String(team?.shortname || team?.short_name || team?.name || fallback).toUpperCase();
+
 function LoadingOverlay() {
   const [data, setData] = useState({
     match: null,
@@ -46,32 +58,45 @@ function LoadingOverlay() {
     ?.map((caster) => caster.name)
     .filter(Boolean)
     .join(" / ") || "";
+  const blueTeamShortName = getTeamShortName(blueTeam, "BLUE");
+  const redTeamShortName = getTeamShortName(redTeam, "RED");
+  const blueLogo = getTeamLogo(blueTeam);
+  const redLogo = getTeamLogo(redTeam);
+  const resolvedBlueLogo = blueLogo ? resolveAssetUrl(blueLogo) : "";
+  const resolvedRedLogo = redLogo ? resolveAssetUrl(redLogo) : "";
 
   return (
     <div className="overlay-canvas overlay-stage">
       <img className="overlay-bg" src={loadingBg} alt="" />
-      <div className="overlay-text loading-title">{match.title || "Match"}</div>
-      <div className="overlay-text loading-mode">{match.mode || ""}</div>
-      <div className="overlay-text loading-game">Game {game.game_no || "-"}</div>
-      <div className="overlay-text loading-casters">{casterLabel}</div>
+     
 
-      <div className="overlay-text loading-blue-name">{blueTeam.name || "Blue"}</div>
-      {blueTeam.logo && (
-        <img
-          className="loading-blue-logo"
-          src={resolveAssetUrl(blueTeam.logo)}
-          alt="Blue team"
-        />
-      )}
+      {resolvedBlueLogo ? (
+        <div className="loading-team-logo-mask loading-team-logo-mask-blue">
+          <img
+            className="loading-team-logo"
+            src={resolvedBlueLogo}
+            alt={`${blueTeamShortName} logo`}
+            draggable="false"
+          />
+        </div>
+      ) : null}
+      <div className="overlay-text loading-team-shortname loading-team-shortname-blue">
+        {blueTeamShortName}
+      </div>
 
-      <div className="overlay-text loading-red-name">{redTeam.name || "Red"}</div>
-      {redTeam.logo && (
-        <img
-          className="loading-red-logo"
-          src={resolveAssetUrl(redTeam.logo)}
-          alt="Red team"
-        />
-      )}
+      {resolvedRedLogo ? (
+        <div className="loading-team-logo-mask loading-team-logo-mask-red">
+          <img
+            className="loading-team-logo"
+            src={resolvedRedLogo}
+            alt={`${redTeamShortName} logo`}
+            draggable="false"
+          />
+        </div>
+      ) : null}
+      <div className="overlay-text loading-team-shortname loading-team-shortname-red">
+        {redTeamShortName}
+      </div>
     </div>
   );
 }

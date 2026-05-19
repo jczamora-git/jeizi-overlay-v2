@@ -1,5 +1,26 @@
 const API_BASE = "/api";
 
+const cleanErrorMessage = (text, response) => {
+  if (!text) {
+    return `Request failed: ${response.status} ${response.statusText}`;
+  }
+
+  try {
+    const parsed = JSON.parse(text);
+    return (
+      parsed?.message ||
+      parsed?.error ||
+      `Request failed: ${response.status} ${response.statusText}`
+    );
+  } catch (error) {
+    const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(text);
+    if (looksLikeHtml) {
+      return `Request failed: ${response.status} ${response.statusText}`;
+    }
+    return text;
+  }
+};
+
 async function request(path, options = {}) {
   const isFormData = options.body instanceof FormData;
   const headers = isFormData ? options.headers : { "Content-Type": "application/json" };
@@ -11,7 +32,7 @@ async function request(path, options = {}) {
 
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || `Request failed: ${response.status}`);
+    throw new Error(cleanErrorMessage(message, response));
   }
 
   if (response.status === 204) {

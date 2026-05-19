@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 function Toast({ message, type = "info", onClose }) {
   useEffect(() => {
@@ -17,14 +18,16 @@ function Toast({ message, type = "info", onClose }) {
     return null;
   }
 
-  return (
-    <div className={`toast toast-${type}`}>
+  const toast = (
+    <div className={`app-toast app-toast-${type}`} role="status">
       <span>{message}</span>
-      <button type="button" className="button-ghost" onClick={onClose}>
+      <button type="button" onClick={onClose}>
         Close
       </button>
     </div>
   );
+
+  return createPortal(toast, document.body);
 }
 
 export default Toast;

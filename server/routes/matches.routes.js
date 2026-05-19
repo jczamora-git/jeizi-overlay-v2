@@ -294,17 +294,30 @@ router.put("/:id/set-active", async (req, res) => {
   }
 });
 
-router.put(":id/start", async (req, res) => {
+router.put("/:id/start", async (req, res) => {
   const connection = await pool.getConnection();
   try {
     const { id } = req.params;
+    const matchId = Number(id);
+
+    if (!Number.isFinite(matchId) || matchId <= 0) {
+      return res.status(400).json({ message: "Invalid match id" });
+    }
 
     await connection.beginTransaction();
-    await connection.query(
-      "UPDATE matches SET status = 'finished' WHERE status IN ('active','live') AND id <> ?",
-      [id]
+    const [matchRows] = await connection.query(
+      "SELECT id FROM matches WHERE id = ? LIMIT 1",
+      [matchId]
     );
-    await connection.query("UPDATE matches SET status = 'live' WHERE id = ?", [id]);
+    if (!matchRows.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Match not found" });
+    }
+    await connection.query(
+      "UPDATE matches SET status = 'finished' WHERE status IN ('active','live','ongoing') AND id <> ?",
+      [matchId]
+    );
+    await connection.query("UPDATE matches SET status = 'live' WHERE id = ?", [matchId]);
     await connection.commit();
 
     const io = req.app.get("io");
@@ -312,7 +325,7 @@ router.put(":id/start", async (req, res) => {
       io.emit("matches:changed");
     }
 
-    res.json({ id: Number(id), status: "live" });
+    res.json({ id: matchId, status: "live" });
   } catch (error) {
     await connection.rollback();
     console.error("Failed to start match", error);
