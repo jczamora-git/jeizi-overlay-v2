@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import Toast from "../../components/common/Toast";
+import bgPatternPreview from "../../game_ui/bg-pattern.png";
 
 const overlays = [
   {
@@ -31,6 +32,22 @@ const overlays = [
     name: "Map Change Overlay",
     route: "/overlay/map-change",
     description: "Map or event change announcement overlay.",
+  },
+  {
+    name: "Victory Overlay",
+    route: "/overlay/victory",
+    description: "Victory announcement overlay with configurable winner lines.",
+  },
+  {
+    name: "Overlay Pattern",
+    route: "/overlays/pattern",
+    description: "Seamless animated pattern background for OBS.",
+    preview: bgPatternPreview,
+  },
+  {
+    name: "Schedule Overlay",
+    route: "/overlays/schedule",
+    description: "Broadcast-style upcoming matches list for OBS.",
   },
 ];
 
@@ -126,12 +143,23 @@ function OverlayLinks() {
                 }
               }}
             >
-              <iframe
-                className="overlay-preview-iframe"
-                src={overlay.route}
-                title={`${overlay.name} preview`}
-                loading="lazy"
-              />
+              {overlay.preview ? (
+                <img
+                  className="overlay-preview-iframe"
+                  src={overlay.preview}
+                  alt={`${overlay.name} preview`}
+                  loading="lazy"
+                  draggable="false"
+                  style={{ objectFit: "cover" }}
+                />
+              ) : (
+                <iframe
+                  className="overlay-preview-iframe"
+                  src={overlay.route}
+                  title={`${overlay.name} preview`}
+                  loading="lazy"
+                />
+              )}
               <div className="overlay-preview-label">{overlay.name}</div>
             </div>
 

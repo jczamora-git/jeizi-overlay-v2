@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import ConfirmationModal from "../../components/common/ConfirmationModal";
 import { createCaster, deleteCaster, getCasters, updateCaster } from "../../services/api";
 import { resolveAssetUrl } from "../../utils/assetUrl";
 
@@ -11,6 +13,15 @@ function CasterConfig() {
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState("");
   const [brokenPhotos, setBrokenPhotos] = useState({});
+  const [confirmState, setConfirmState] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "",
+    onConfirm: () => {},
+  });
   const fileInputRef = useRef(null);
 
   const loadCasters = async () => {
@@ -36,6 +47,51 @@ function CasterConfig() {
     };
   }, [photoFile]);
 
+  const resetForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+    setPhotoFile(null);
+    setPhotoPreview("");
+  };
+
+  const closeConfirm = () => {
+    setConfirmState((prev) => ({
+      ...prev,
+      open: false,
+      onConfirm: () => {},
+    }));
+  };
+
+  const openConfirm = ({
+    title,
+    message,
+    confirmText = "Confirm",
+    cancelText = "Cancel",
+    variant = "",
+    onConfirm,
+  }) => {
+    setConfirmState({
+      open: true,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      variant,
+      onConfirm,
+    });
+  };
+
+  const saveCaster = async (payload) => {
+    if (editingId) {
+      await updateCaster(editingId, payload);
+    } else {
+      await createCaster(payload);
+    }
+
+    resetForm();
+    await loadCasters();
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.name.trim()) {
@@ -51,17 +107,18 @@ function CasterConfig() {
       payload.append("photo", photoFile);
     }
 
-    if (editingId) {
-      await updateCaster(editingId, payload);
-    } else {
-      await createCaster(payload);
-    }
-
-    setForm(emptyForm);
-    setEditingId(null);
-    setPhotoFile(null);
-    setPhotoPreview("");
-    await loadCasters();
+    const isEditing = Boolean(editingId);
+    openConfirm({
+      title: isEditing ? "Save Changes" : "Create Caster",
+      message: isEditing
+        ? "Apply these changes?"
+        : "Create this caster with the entered details?",
+      confirmText: isEditing ? "Save Changes" : "Create",
+      onConfirm: async () => {
+        await saveCaster(payload);
+        closeConfirm();
+      },
+    });
   };
 
   const handleEdit = (caster) => {
@@ -74,12 +131,18 @@ function CasterConfig() {
     setPhotoPreview("");
   };
 
-  const handleDelete = async (casterId) => {
-    if (!window.confirm("Delete this caster?")) {
-      return;
-    }
-    await deleteCaster(casterId);
-    await loadCasters();
+  const handleDelete = (caster) => {
+    openConfirm({
+      title: "Delete Caster",
+      message: `Are you sure you want to delete ${caster.name}? This action cannot be undone.`,
+      confirmText: "Delete",
+      variant: "danger",
+      onConfirm: async () => {
+        await deleteCaster(caster.id);
+        await loadCasters();
+        closeConfirm();
+      },
+    });
   };
 
   const handlePhotoPick = () => {
@@ -175,8 +238,7 @@ function CasterConfig() {
               type="button"
               className="secondary"
               onClick={() => {
-                setEditingId(null);
-                setForm(emptyForm);
+                resetForm();
               }}
             >
               Cancel
@@ -227,7 +289,7 @@ function CasterConfig() {
                 <td>{caster.name}</td>
                 <td>
                   <button onClick={() => handleEdit(caster)}>Edit</button>
-                  <button className="secondary" onClick={() => handleDelete(caster.id)}>
+                  <button className="secondary" onClick={() => handleDelete(caster)}>
                     Delete
                   </button>
                 </td>
@@ -236,6 +298,22 @@ function CasterConfig() {
           </tbody>
         </table>
       </section>
+
+      {confirmState.open
+        ? createPortal(
+            <ConfirmationModal
+              open={confirmState.open}
+              title={confirmState.title}
+              message={confirmState.message}
+              confirmText={confirmState.confirmText}
+              cancelText={confirmState.cancelText}
+              variant={confirmState.variant}
+              onConfirm={confirmState.onConfirm}
+              onCancel={closeConfirm}
+            />,
+            document.body
+          )
+        : null}
     </div>
   );
 }

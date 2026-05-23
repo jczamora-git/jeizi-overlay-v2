@@ -10,6 +10,7 @@ const broadcastShortcuts = [
   { label: "Gameplay", route: "/overlay/gameplay" },
   { label: "Results", route: "/overlay/results" },
   { label: "Map Change", route: "/overlay/map-change" },
+  { label: "Victory", route: "/overlay/victory" },
 ];
 
 const controlLinks = [

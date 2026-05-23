@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getCurrentOverlayData } from "../../services/api";
+import { getCurrentOverlayData, getOverlaySettings } from "../../services/api";
 import overlayMeta from "../../data/overlay-meta.json";
 import gameplayBg from "../../game_ui/gameoverlay.png";
 import { resolveAssetUrl } from "../../utils/assetUrl";
@@ -64,6 +64,34 @@ function GameplayOverlay() {
     game: null,
     map: null,
   });
+  const [isGameOverlayEnabled, setIsGameOverlayEnabled] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSettings = async () => {
+      try {
+        const settings = await getOverlaySettings();
+        if (!isMounted) {
+          return;
+        }
+        setIsGameOverlayEnabled(settings?.game_overlay !== false);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+        setIsGameOverlayEnabled(true);
+      }
+    };
+
+    loadSettings();
+    const interval = setInterval(loadSettings, 1000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -89,6 +117,10 @@ function GameplayOverlay() {
       clearInterval(timer);
     };
   }, []);
+
+  if (!isGameOverlayEnabled) {
+    return null;
+  }
 
   const match = data.match || {};
   const blueTeam = data.blue_team || {};

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   createGame,
   deleteMatch,
@@ -36,6 +37,14 @@ const emptyMatchForm = {
 
 const emptyGameForm = { map_id: "" };
 
+const getDefaultCasterIds = (casterList = []) => {
+  if (casterList.length === 1) {
+    return [casterList[0].id];
+  }
+
+  return [];
+};
+
 function getMaxGamesByMode(mode) {
   switch (mode) {
     case "BO1":
@@ -49,6 +58,15 @@ function getMaxGamesByMode(mode) {
     default:
       return 1;
   }
+}
+
+function getRequiredWins(mode) {
+  const normalized = String(mode || "").toUpperCase();
+  if (normalized === "BO1") return 1;
+  if (normalized === "BO3") return 2;
+  if (normalized === "BO5") return 3;
+  if (normalized === "BO7") return 3;
+  return 1;
 }
 
 function buildSwitchedMatchPayload(matchOrForm) {
@@ -69,6 +87,7 @@ function MatchConfig() {
   const [maps, setMaps] = useState([]);
   const [matchForm, setMatchForm] = useState(emptyMatchForm);
   const [selectedCasterIds, setSelectedCasterIds] = useState([]);
+  const [hasAutoSelectedCaster, setHasAutoSelectedCaster] = useState(false);
   const [editingMatchId, setEditingMatchId] = useState(null);
   const [selectedMatchId, setSelectedMatchId] = useState(null);
   const [mapDrafts, setMapDrafts] = useState({});
@@ -251,18 +270,65 @@ function MatchConfig() {
     return getMaxGamesByMode(selectedMatch?.mode);
   }, [selectedMatch]);
 
+  const selectedMatchSeriesState = useMemo(() => {
+    if (!selectedMatch) {
+      return {
+        blueWins: 0,
+        redWins: 0,
+        requiredWins: 1,
+        seriesCompleted: false,
+        seriesWinnerTeamId: null,
+      };
+    }
+
+    let blueWins = 0;
+    let redWins = 0;
+
+    gamesForSelectedMatch.forEach((game) => {
+      if (String(game.status || "").toLowerCase() !== "finished" || !game.winner_team_id) {
+        return;
+      }
+
+      if (String(game.winner_team_id) === String(selectedMatch.blue_team_id)) {
+        blueWins += 1;
+      } else if (String(game.winner_team_id) === String(selectedMatch.red_team_id)) {
+        redWins += 1;
+      }
+    });
+
+    const requiredWins = getRequiredWins(selectedMatch.mode);
+    const fallbackWinnerTeamId =
+      blueWins >= requiredWins
+        ? selectedMatch.blue_team_id
+        : redWins >= requiredWins
+          ? selectedMatch.red_team_id
+          : null;
+
+    return {
+      blueWins,
+      redWins,
+      requiredWins,
+      seriesCompleted:
+        Boolean(Number(selectedMatch.series_completed)) || blueWins >= requiredWins || redWins >= requiredWins,
+      seriesWinnerTeamId: selectedMatch.series_winner_team_id || fallbackWinnerTeamId,
+    };
+  }, [gamesForSelectedMatch, selectedMatch]);
+
   const hasReachedSelectedMatchGameLimit = useMemo(() => {
     return gamesForSelectedMatch.length >= selectedMatchMaxGames;
   }, [gamesForSelectedMatch.length, selectedMatchMaxGames]);
 
-  const resetMatchForm = () => {
+  const isSelectedMatchSeriesComplete = selectedMatchSeriesState.seriesCompleted;
+
+  const resetMatchForm = ({ casterIds = [] } = {}) => {
     setMatchForm({ ...emptyMatchForm, match_no: nextMatchNo });
-    setSelectedCasterIds([]);
+    setSelectedCasterIds(casterIds);
+    setHasAutoSelectedCaster(casterIds.length > 0);
   };
 
   const handleNewMatch = () => {
     setEditingMatchId(null);
-    resetMatchForm();
+    resetMatchForm({ casterIds: getDefaultCasterIds(casters) });
     setIsNewMatchOpen(true);
   };
 
@@ -289,7 +355,78 @@ function MatchConfig() {
     setIsEditMatchOpen(true);
   };
 
-  const handleMatchSave = async () => {
+  useEffect(() => {
+    if (!isNewMatchOpen || editingMatchId) {
+      return;
+    }
+    if (casters.length !== 1) {
+      return;
+    }
+    if (hasAutoSelectedCaster) {
+      return;
+    }
+
+    setSelectedCasterIds((current) => {
+      if (current.length > 0) {
+        return current;
+      }
+
+      return [casters[0].id];
+    });
+    setHasAutoSelectedCaster(true);
+  }, [isNewMatchOpen, editingMatchId, casters, hasAutoSelectedCaster]);
+
+  useEffect(() => {
+    const hasOpenModal =
+      isNewMatchOpen || isEditMatchOpen || isGamesOpen || confirmState.open;
+
+    if (!hasOpenModal) {
+      return undefined;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isNewMatchOpen, isEditMatchOpen, isGamesOpen, confirmState.open]);
+
+  const saveMatch = async (payload) => {
+    try {
+      if (editingMatchId) {
+        console.log("Update match payload:", payload);
+        await updateMatch(editingMatchId, payload);
+        showToast("Match updated.", "success");
+        const existingGameCount = games.filter(
+          (game) => Number(game.match_id) === Number(editingMatchId)
+        ).length;
+        if (existingGameCount > getMaxGamesByMode(payload.mode)) {
+          showToast(
+            "This match already has more games than the selected mode. Please delete extra games manually.",
+            "info"
+          );
+        }
+        setIsEditMatchOpen(false);
+      } else {
+        const result = await createMatch(payload);
+        showToast(
+          `Match created. ${result?.generated_games || getMaxGamesByMode(payload.mode)} games generated.`,
+          "success"
+        );
+        setIsNewMatchOpen(false);
+      }
+      resetMatchForm();
+      await loadData();
+      return true;
+    } catch (err) {
+      console.error("Failed to save match", err);
+      showToast(err?.message || "Failed to save match.", "error");
+      return false;
+    }
+  };
+
+  const handleMatchSave = () => {
     if (!matchForm.blue_team_id || !matchForm.red_team_id) {
       showToast("Blue Team and Red Team are required.", "error");
       return;
@@ -316,35 +453,18 @@ function MatchConfig() {
       caster_ids: selectedCasterIds.join(","),
     };
 
-    try {
-      if (editingMatchId) {
-        console.log("Update match payload:", payload);
-        await updateMatch(editingMatchId, payload);
-        showToast("Match updated.", "success");
-        const existingGameCount = games.filter(
-          (game) => Number(game.match_id) === Number(editingMatchId)
-        ).length;
-        if (existingGameCount > getMaxGamesByMode(payload.mode)) {
-          showToast(
-            "This match already has more games than the selected mode. Please delete extra games manually.",
-            "info"
-          );
+    const isEditing = Boolean(editingMatchId);
+    openConfirm({
+      title: isEditing ? "Save Changes" : "Create Match",
+      message: isEditing ? "Apply these changes?" : "Create this match with the entered details?",
+      confirmText: isEditing ? "Save Changes" : "Create",
+      onConfirm: async () => {
+        const didSave = await saveMatch(payload);
+        if (didSave) {
+          closeConfirm();
         }
-        setIsEditMatchOpen(false);
-      } else {
-        const result = await createMatch(payload);
-        showToast(
-          `Match created. ${result?.generated_games || getMaxGamesByMode(payload.mode)} games generated.`,
-          "success"
-        );
-        setIsNewMatchOpen(false);
-      }
-      resetMatchForm();
-      await loadData();
-    } catch (err) {
-      console.error("Failed to save match", err);
-      showToast(err?.message || "Failed to save match.", "error");
-    }
+      },
+    });
   };
 
   const handleSwitchTeams = () => {
@@ -450,6 +570,11 @@ function MatchConfig() {
       return;
     }
 
+    if (isSelectedMatchSeriesComplete) {
+      showToast("Series already complete.", "error");
+      return;
+    }
+
     if (hasReachedSelectedMatchGameLimit) {
       showToast(`Maximum games reached for ${selectedMatch.mode}.`, "error");
       return;
@@ -496,6 +621,15 @@ function MatchConfig() {
   };
 
   const handleGameStatus = async (game, status) => {
+    if (
+      isSelectedMatchSeriesComplete &&
+      status === "live" &&
+      String(game.status || "").toLowerCase() !== "live"
+    ) {
+      showToast("Series already complete.", "error");
+      return;
+    }
+
     try {
       await updateGame(game.id, { status });
       showToast(`Game set to ${status}.`, "success");
@@ -539,6 +673,11 @@ function MatchConfig() {
   };
 
   const handleWinner = (game, teamId, sideLabel) => {
+    if (isSelectedMatchSeriesComplete && !game.winner_team_id) {
+      showToast("Series already complete.", "error");
+      return;
+    }
+
     const submitWinner = async () => {
       try {
         await setGameWinner(game.id, { winner_team_id: teamId });
@@ -681,6 +820,20 @@ function MatchConfig() {
     return teamNameById[game.winner_team_id] || game.winner_team_id;
   };
 
+  const getSeriesWinnerLabel = (match, winnerTeamId) => {
+    if (!winnerTeamId) {
+      return "-";
+    }
+
+    return (
+      teamNameById[winnerTeamId] ||
+      (String(winnerTeamId) === String(match?.blue_team_id)
+        ? match?.blue_team_id
+        : match?.red_team_id) ||
+      winnerTeamId
+    );
+  };
+
   return (
     <div className="controller-page">
       <div className="toast-container">
@@ -742,7 +895,12 @@ function MatchConfig() {
                   </td>
                   <td data-label="Casters">{formatCasterNames(match.caster_ids) || "-"}</td>
                   <td data-label="Status">
-                    <span className={statusClass(match.status)}>{match.status}</span>
+                    <div className="match-status-stack">
+                      <span className={statusClass(match.status)}>{match.status}</span>
+                      {Number(match.series_completed) === 1 ? (
+                        <small className="helper-text">Series Complete</small>
+                      ) : null}
+                    </div>
                   </td>
                   <td data-label="Queue">{match.queue_order || "-"}</td>
                   <td data-label="Actions">
@@ -821,544 +979,632 @@ function MatchConfig() {
         </section>
       </div>
 
-      {isNewMatchOpen && (
-        <div className="modal-backdrop">
-          <div className="modal-panel match-modal-panel">
-            <div className="modal-header">
-              <h3>New Match</h3>
-            </div>
-            <div className="modal-body">
-              <section className="modal-section">
-                <div className="modal-section-title">Match Setup</div>
-                <div className="form-grid modal-form-grid">
-                  <label className="form-group">
-                    Match No
-                    <input value={nextMatchNo} readOnly />
-                    <span className="helper-text">Auto-generated</span>
-                  </label>
-                  <div className="form-group">
-                    Mode
-                    <CustomDropdown
-                      value={matchForm.mode}
-                      options={modeOptions}
-                      placeholder="Select mode"
-                      onChange={(selectedValue) =>
-                        setMatchForm({ ...matchForm, mode: selectedValue })
-                      }
-                    />
-                  </div>
-                  <div className="form-group">
-                    Title
-                    <CustomDropdown
-                      value={matchForm.title}
-                      options={titleOptions}
-                      placeholder="Select title"
-                      onChange={(selectedValue) =>
-                        setMatchForm({ ...matchForm, title: selectedValue })
-                      }
-                    />
-                  </div>
-                  <label className="form-group">
-                    Queue Order
-                    <input
-                      value={matchForm.queue_order}
-                      onChange={(event) =>
-                        setMatchForm({ ...matchForm, queue_order: event.target.value })
-                      }
-                      placeholder="Auto"
-                    />
-                    <span className="helper-text">
-                      Leave blank to auto-place this match at the end of the queue.
-                    </span>
-                  </label>
+      {isNewMatchOpen
+        ? createPortal(
+            <div className="modal-backdrop">
+              <div className="modal-panel match-modal-panel">
+                <div className="modal-header">
+                  <h3>New Match</h3>
                 </div>
-              </section>
-
-              <section className="modal-section">
-                <div className="modal-section-title">Teams</div>
-                <div className="form-grid modal-form-grid">
-                  <div className="form-group">
-                    Blue Team
-                    <CustomDropdown
-                      value={matchForm.blue_team_id}
-                      options={teamOptions.filter(
-                        (team) => String(team.value) !== String(matchForm.red_team_id || "")
-                      )}
-                      placeholder="Select team"
-                      onChange={(selectedValue) =>
-                        setMatchForm({ ...matchForm, blue_team_id: selectedValue })
-                      }
-                    />
-                  </div>
-                  <div className="form-group">
-                    Red Team
-                    <CustomDropdown
-                      value={matchForm.red_team_id}
-                      options={teamOptions.filter(
-                        (team) => String(team.value) !== String(matchForm.blue_team_id || "")
-                      )}
-                      placeholder="Select team"
-                      onChange={(selectedValue) =>
-                        setMatchForm({ ...matchForm, red_team_id: selectedValue })
-                      }
-                    />
-                  </div>
-                </div>
-              </section>
-
-              <section className="modal-section">
-                <div className="modal-section-title">Casters</div>
-                <div className="checkbox-list">
-                  {casters.length ? (
-                    casters.map((caster) => (
-                      <label key={caster.id} className="checkbox-item">
-                        <input
-                          type="checkbox"
-                          checked={selectedCasterIds.includes(caster.id)}
-                          onChange={() => toggleCaster(caster.id)}
-                        />
-                        {caster.name}
+                <div className="modal-body">
+                  <section className="modal-section">
+                    <div className="modal-section-title">Match Setup</div>
+                    <div className="form-grid modal-form-grid">
+                      <label className="form-group">
+                        Match No
+                        <input value={nextMatchNo} readOnly />
+                        <span className="helper-text">Auto-generated</span>
                       </label>
-                    ))
-                  ) : (
-                    <span className="muted">No casters found.</span>
-                  )}
-                </div>
-              </section>
-            </div>
-            <div className="modal-footer">
-              <button type="button" className="button-ghost" onClick={() => setIsNewMatchOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="button-primary" onClick={handleMatchSave}>
-                Create Match
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                      <div className="form-group">
+                        Mode
+                        <CustomDropdown
+                          value={matchForm.mode}
+                          options={modeOptions}
+                          placeholder="Select mode"
+                          onChange={(selectedValue) =>
+                            setMatchForm({ ...matchForm, mode: selectedValue })
+                          }
+                        />
+                      </div>
+                      <div className="form-group">
+                        Title
+                        <CustomDropdown
+                          value={matchForm.title}
+                          options={titleOptions}
+                          placeholder="Select title"
+                          onChange={(selectedValue) =>
+                            setMatchForm({ ...matchForm, title: selectedValue })
+                          }
+                        />
+                      </div>
+                      <label className="form-group">
+                        Queue Order
+                        <input
+                          value={matchForm.queue_order}
+                          onChange={(event) =>
+                            setMatchForm({
+                              ...matchForm,
+                              queue_order: event.target.value,
+                            })
+                          }
+                          placeholder="Auto"
+                        />
+                        <span className="helper-text">
+                          Leave blank to auto-place this match at the end of the queue.
+                        </span>
+                      </label>
+                    </div>
+                  </section>
 
-      {isEditMatchOpen && (
-        <div className="modal-backdrop">
-          <div className="modal-panel match-modal-panel">
-            <div className="modal-header">
-              <div className="modal-title-row">
-                <div>
-                  <h3>Edit Match</h3>
-                  <div className="modal-subtitle">
-                    Update match setup, teams, casters, and score.
-                  </div>
+                  <section className="modal-section">
+                    <div className="modal-section-title">Teams</div>
+                    <div className="form-grid modal-form-grid">
+                      <div className="form-group">
+                        Blue Team
+                        <CustomDropdown
+                          value={matchForm.blue_team_id}
+                          options={teamOptions.filter(
+                            (team) =>
+                              String(team.value) !== String(matchForm.red_team_id || "")
+                          )}
+                          placeholder="Select team"
+                          onChange={(selectedValue) =>
+                            setMatchForm({ ...matchForm, blue_team_id: selectedValue })
+                          }
+                        />
+                      </div>
+                      <div className="form-group">
+                        Red Team
+                        <CustomDropdown
+                          value={matchForm.red_team_id}
+                          options={teamOptions.filter(
+                            (team) =>
+                              String(team.value) !== String(matchForm.blue_team_id || "")
+                          )}
+                          placeholder="Select team"
+                          onChange={(selectedValue) =>
+                            setMatchForm({ ...matchForm, red_team_id: selectedValue })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="modal-section">
+                    <div className="modal-section-title">Casters</div>
+                    <div className="checkbox-list">
+                      {casters.length ? (
+                        casters.map((caster) => (
+                          <label key={caster.id} className="checkbox-item">
+                            <input
+                              type="checkbox"
+                              checked={selectedCasterIds.includes(caster.id)}
+                              onChange={() => toggleCaster(caster.id)}
+                            />
+                            {caster.name}
+                          </label>
+                        ))
+                      ) : (
+                        <span className="muted">No casters found.</span>
+                      )}
+                    </div>
+                  </section>
                 </div>
-                <button
-                  type="button"
-                  className="button-secondary"
-                  onClick={openManageGamesFromEdit}
-                >
-                  Manage Games
-                </button>
+                <div className="modal-footer">
+                  <button
+                    type="button"
+                    className="button-ghost"
+                    onClick={() => setIsNewMatchOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button type="button" className="button-primary" onClick={handleMatchSave}>
+                    Create Match
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="modal-body">
-              <section className="modal-section">
-                <div className="modal-section-title">Match Setup</div>
-                <div className="form-grid modal-form-grid">
-                  <label className="form-group">
-                    Match No
-                    <input value={matchForm.match_no} readOnly />
-                  </label>
-                  <div className="form-group">
-                    Mode
-                    <CustomDropdown
-                      value={matchForm.mode}
-                      options={modeOptions}
-                      placeholder="Select mode"
-                      onChange={(selectedValue) =>
-                        setMatchForm({ ...matchForm, mode: selectedValue })
-                      }
-                    />
-                  </div>
-                  <div className="form-group">
-                    Title
-                    <CustomDropdown
-                      value={matchForm.title}
-                      options={titleOptions}
-                      placeholder="Select title"
-                      onChange={(selectedValue) =>
-                        setMatchForm({ ...matchForm, title: selectedValue })
-                      }
-                    />
-                  </div>
-                  <label className="form-group">
-                    Queue Order
-                    <input
-                      value={matchForm.queue_order}
-                      onChange={(event) =>
-                        setMatchForm({ ...matchForm, queue_order: event.target.value })
-                      }
-                      placeholder="Auto"
-                    />
-                  </label>
-                </div>
-              </section>
+            </div>,
+            document.body
+          )
+        : null}
 
-              <section className="modal-section">
-                <div className="modal-section-title">Teams</div>
-                <div className="form-grid modal-form-grid modal-team-grid">
-                  <div className="form-group">
-                    Blue Team
-                    <CustomDropdown
-                      value={matchForm.blue_team_id}
-                      options={teamOptions.filter(
-                        (team) => String(team.value) !== String(matchForm.red_team_id || "")
-                      )}
-                      placeholder="Select team"
-                      onChange={(selectedValue) =>
-                        setMatchForm({ ...matchForm, blue_team_id: selectedValue })
-                      }
-                    />
-                  </div>
-                  <div className="form-group">
-                    Red Team
-                    <CustomDropdown
-                      value={matchForm.red_team_id}
-                      options={teamOptions.filter(
-                        (team) => String(team.value) !== String(matchForm.blue_team_id || "")
-                      )}
-                      placeholder="Select team"
-                      onChange={(selectedValue) =>
-                        setMatchForm({ ...matchForm, red_team_id: selectedValue })
-                      }
-                    />
-                  </div>
-                  <div className="form-group modal-switch-group">
-                    <button type="button" className="button-secondary" onClick={handleSwitchTeams}>
-                      Switch Teams
+      {isEditMatchOpen
+        ? createPortal(
+            <div className="modal-backdrop">
+              <div className="modal-panel match-modal-panel">
+                <div className="modal-header">
+                  <div className="modal-title-row">
+                    <div>
+                      <h3>Edit Match</h3>
+                      <div className="modal-subtitle">
+                        Update match setup, teams, casters, and score.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={openManageGamesFromEdit}
+                    >
+                      Manage Games
                     </button>
                   </div>
                 </div>
-              </section>
-
-              <section className="modal-section">
-                <div className="modal-section-title">Casters</div>
-                <div className="checkbox-list">
-                  {casters.length ? (
-                    casters.map((caster) => (
-                      <label key={caster.id} className="checkbox-item">
-                        <input
-                          type="checkbox"
-                          checked={selectedCasterIds.includes(caster.id)}
-                          onChange={() => toggleCaster(caster.id)}
-                        />
-                        {caster.name}
+                <div className="modal-body">
+                  <section className="modal-section">
+                    <div className="modal-section-title">Match Setup</div>
+                    <div className="form-grid modal-form-grid">
+                      <label className="form-group">
+                        Match No
+                        <input value={matchForm.match_no} readOnly />
                       </label>
-                    ))
-                  ) : (
-                    <span className="muted">No casters found.</span>
-                  )}
-                </div>
-              </section>
-
-              <section className="modal-section">
-                <div className="modal-section-title">Score</div>
-                <div className="form-grid modal-form-grid">
-                  <label className="form-group">
-                    Blue Score
-                    <input
-                      type="number"
-                      value={matchForm.blue_score}
-                      onChange={(event) =>
-                        setMatchForm({ ...matchForm, blue_score: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="form-group">
-                    Red Score
-                    <input
-                      type="number"
-                      value={matchForm.red_score}
-                      onChange={(event) =>
-                        setMatchForm({ ...matchForm, red_score: event.target.value })
-                      }
-                    />
-                  </label>
-                </div>
-              </section>
-            </div>
-            <div className="modal-footer">
-              <button type="button" className="button-ghost" onClick={() => setIsEditMatchOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="button-primary" onClick={handleMatchSave}>
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isGamesOpen && selectedMatch && (
-        <div className="modal-backdrop">
-          <div className="modal-panel games-modal-panel">
-            <div className="modal-header">
-              <div>
-                <h3>
-                  Manage Games - Match #{selectedMatch.match_no} {selectedMatch.title || ""}
-                </h3>
-                <div className="modal-subtitle">
-                  {teamNameById[selectedMatch.blue_team_id] || "-"} vs{" "}
-                  {teamNameById[selectedMatch.red_team_id] || "-"}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={() => openEditMatchFromManageGames(selectedMatch)}
-              >
-                Edit Match
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="modern-card games-summary-card">
-                <div className="games-summary-item">
-                  <span className="games-summary-label">Teams</span>
-                  <strong>
-                    {teamNameById[selectedMatch.blue_team_id] || "-"} vs{" "}
-                    {teamNameById[selectedMatch.red_team_id] || "-"}
-                  </strong>
-                </div>
-                <div className="games-summary-item">
-                  <span className="games-summary-label">Mode</span>
-                  <strong>{selectedMatch.mode || "-"}</strong>
-                </div>
-                <div className="games-summary-item">
-                  <span className="games-summary-label">Score</span>
-                  <strong>
-                    {selectedMatch.blue_score ?? 0} - {selectedMatch.red_score ?? 0}
-                  </strong>
-                </div>
-                <div className="games-summary-item">
-                  <span className="games-summary-label">Status</span>
-                  <span className={statusClass(selectedMatch.status)}>
-                    {selectedMatch.status || "queued"}
-                  </span>
-                </div>
-              </div>
-
-              {hasReachedSelectedMatchGameLimit ? (
-                <div className="modern-card game-limit-compact">
-                  <span className="game-count-badge">
-                    Games {gamesForSelectedMatch.length} / {selectedMatchMaxGames}
-                  </span>
-                  <small className="game-limit-warning">
-                    Maximum games reached for {selectedMatch.mode}.
-                  </small>
-                </div>
-              ) : (
-                <div className="modern-card games-create-card">
-                  <div className="game-record-header">
-                    <div>
-                      <div className="game-record-title">Add Game</div>
-                      <div className="helper-text">Game number stays auto-generated per match.</div>
+                      <div className="form-group">
+                        Mode
+                        <CustomDropdown
+                          value={matchForm.mode}
+                          options={modeOptions}
+                          placeholder="Select mode"
+                          onChange={(selectedValue) =>
+                            setMatchForm({ ...matchForm, mode: selectedValue })
+                          }
+                        />
+                      </div>
+                      <div className="form-group">
+                        Title
+                        <CustomDropdown
+                          value={matchForm.title}
+                          options={titleOptions}
+                          placeholder="Select title"
+                          onChange={(selectedValue) =>
+                            setMatchForm({ ...matchForm, title: selectedValue })
+                          }
+                        />
+                      </div>
+                      <label className="form-group">
+                        Queue Order
+                        <input
+                          value={matchForm.queue_order}
+                          onChange={(event) =>
+                            setMatchForm({
+                              ...matchForm,
+                              queue_order: event.target.value,
+                            })
+                          }
+                          placeholder="Auto"
+                        />
+                      </label>
                     </div>
-                    <div className="game-count-badge">
-                      Games {gamesForSelectedMatch.length} / {selectedMatchMaxGames}
+                  </section>
+
+                  <section className="modal-section">
+                    <div className="modal-section-title">Teams</div>
+                    <div className="form-grid modal-form-grid modal-team-grid">
+                      <div className="form-group">
+                        Blue Team
+                        <CustomDropdown
+                          value={matchForm.blue_team_id}
+                          options={teamOptions.filter(
+                            (team) =>
+                              String(team.value) !== String(matchForm.red_team_id || "")
+                          )}
+                          placeholder="Select team"
+                          onChange={(selectedValue) =>
+                            setMatchForm({ ...matchForm, blue_team_id: selectedValue })
+                          }
+                        />
+                      </div>
+                      <div className="form-group">
+                        Red Team
+                        <CustomDropdown
+                          value={matchForm.red_team_id}
+                          options={teamOptions.filter(
+                            (team) =>
+                              String(team.value) !== String(matchForm.blue_team_id || "")
+                          )}
+                          placeholder="Select team"
+                          onChange={(selectedValue) =>
+                            setMatchForm({ ...matchForm, red_team_id: selectedValue })
+                          }
+                        />
+                      </div>
+                      <div className="form-group modal-switch-group">
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={handleSwitchTeams}
+                        >
+                          Switch Teams
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="modal-section">
+                    <div className="modal-section-title">Casters</div>
+                    <div className="checkbox-list">
+                      {casters.length ? (
+                        casters.map((caster) => (
+                          <label key={caster.id} className="checkbox-item">
+                            <input
+                              type="checkbox"
+                              checked={selectedCasterIds.includes(caster.id)}
+                              onChange={() => toggleCaster(caster.id)}
+                            />
+                            {caster.name}
+                          </label>
+                        ))
+                      ) : (
+                        <span className="muted">No casters found.</span>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="modal-section">
+                    <div className="modal-section-title">Score</div>
+                    <div className="form-grid modal-form-grid">
+                      <label className="form-group">
+                        Blue Score
+                        <input
+                          type="number"
+                          value={matchForm.blue_score}
+                          onChange={(event) =>
+                            setMatchForm({ ...matchForm, blue_score: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="form-group">
+                        Red Score
+                        <input
+                          type="number"
+                          value={matchForm.red_score}
+                          onChange={(event) =>
+                            setMatchForm({ ...matchForm, red_score: event.target.value })
+                          }
+                        />
+                      </label>
+                    </div>
+                  </section>
+                </div>
+                <div className="modal-footer">
+                  <button
+                    type="button"
+                    className="button-ghost"
+                    onClick={() => setIsEditMatchOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button type="button" className="button-primary" onClick={handleMatchSave}>
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {isGamesOpen && selectedMatch
+        ? createPortal(
+            <div className="modal-backdrop">
+              <div className="modal-panel games-modal-panel">
+                <div className="modal-header">
+                  <div>
+                    <h3>
+                      Manage Games - Match #{selectedMatch.match_no} {selectedMatch.title || ""}
+                    </h3>
+                    <div className="modal-subtitle">
+                      {teamNameById[selectedMatch.blue_team_id] || "-"} vs{" "}
+                      {teamNameById[selectedMatch.red_team_id] || "-"}
                     </div>
                   </div>
-                  <div className="form-grid games-create-grid">
-                    <label className="form-group">
-                      Game No
-                      <input value={nextGameNo || ""} readOnly />
-                      <span className="helper-text">Auto per match</span>
-                    </label>
-                    <div className="form-group">
-                      Map
-                      <CustomDropdown
-                        value={gameForm.map_id}
-                        options={addGameMapOptions}
-                        placeholder="Select map"
-                        onChange={(selectedValue) => setGameForm({ map_id: selectedValue })}
-                      />
-                      <span className="helper-text">
-                        Map can be assigned now and revealed later.
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => openEditMatchFromManageGames(selectedMatch)}
+                  >
+                    Edit Match
+                  </button>
+                </div>
+                <div className="modal-body">
+                  <div className="modern-card games-summary-card">
+                    <div className="games-summary-item">
+                      <span className="games-summary-label">Teams</span>
+                      <strong>
+                        {teamNameById[selectedMatch.blue_team_id] || "-"} vs{" "}
+                        {teamNameById[selectedMatch.red_team_id] || "-"}
+                      </strong>
+                    </div>
+                    <div className="games-summary-item">
+                      <span className="games-summary-label">Mode</span>
+                      <strong>{selectedMatch.mode || "-"}</strong>
+                    </div>
+                    <div className="games-summary-item">
+                      <span className="games-summary-label">Score</span>
+                      <strong>
+                        {selectedMatch.blue_score ?? 0} - {selectedMatch.red_score ?? 0}
+                      </strong>
+                    </div>
+                    <div className="games-summary-item">
+                      <span className="games-summary-label">Status</span>
+                      <span className={statusClass(selectedMatch.status)}>
+                        {selectedMatch.status || "queued"}
                       </span>
                     </div>
-                    <div className="form-actions games-create-actions">
-                      <button
-                        type="button"
-                        className="button-primary"
-                        onClick={handleAddGame}
-                      >
-                        Add Game
-                      </button>
+                    <div className="games-summary-item">
+                      <span className="games-summary-label">Series</span>
+                      <strong>
+                        {selectedMatchSeriesState.blueWins} - {selectedMatchSeriesState.redWins}
+                      </strong>
                     </div>
                   </div>
-                  <div className="helper-text">
-                    Maximum {selectedMatchMaxGames} games for {selectedMatch.mode}.
-                  </div>
-                </div>
-              )}
 
-              <div className="games-grid">
-                {gamesForSelectedMatch.length ? (
-                  gamesForSelectedMatch.map((game) => {
-                    const sides = getGameSides(game.game_no, selectedMatch);
-                    const blueSideName = sides.blueTeamId
-                      ? teamNameById[sides.blueTeamId] || sides.blueTeamId
-                      : "-";
-                    const redSideName = sides.redTeamId
-                      ? teamNameById[sides.redTeamId] || sides.redTeamId
-                      : "-";
-                    const mapValue = mapDrafts[game.id] ?? game.map_id ?? "";
-                    const hasMapChanged =
-                      String(mapDrafts[game.id] ?? "") !== String(game.map_id ?? "");
+                  {isSelectedMatchSeriesComplete ? (
+                    <div className="modern-card game-limit-compact">
+                      <span className="game-count-badge">Series Complete</span>
+                      <small className="game-limit-warning">
+                        Winner:{" "}
+                        {getSeriesWinnerLabel(
+                          selectedMatch,
+                          selectedMatchSeriesState.seriesWinnerTeamId
+                        )}
+                      </small>
+                      <small className="helper-text">
+                        Finish match when Results Overlay is no longer needed.
+                      </small>
+                    </div>
+                  ) : null}
 
-                    return (
-                      <article key={game.id} className="game-record-card">
-                        <div className="game-record-header">
-                          <div>
-                            <div className="game-record-title">Game {game.game_no}</div>
-                            <div className="helper-text">Sides auto-switch on even game numbers.</div>
+                  {isSelectedMatchSeriesComplete ? (
+                    <div className="modern-card game-limit-compact">
+                      <span className="game-count-badge">
+                        Games {gamesForSelectedMatch.length} / {selectedMatchMaxGames}
+                      </span>
+                      <small className="game-limit-warning">Series already complete.</small>
+                    </div>
+                  ) : hasReachedSelectedMatchGameLimit ? (
+                    <div className="modern-card game-limit-compact">
+                      <span className="game-count-badge">
+                        Games {gamesForSelectedMatch.length} / {selectedMatchMaxGames}
+                      </span>
+                      <small className="game-limit-warning">
+                        Maximum games reached for {selectedMatch.mode}.
+                      </small>
+                    </div>
+                  ) : (
+                    <div className="modern-card games-create-card">
+                      <div className="game-record-header">
+                        <div>
+                          <div className="game-record-title">Add Game</div>
+                          <div className="helper-text">
+                            Game number stays auto-generated per match.
                           </div>
-                          <span className={statusClass(game.status)}>{game.status || "queued"}</span>
                         </div>
+                        <div className="game-count-badge">
+                          Games {gamesForSelectedMatch.length} / {selectedMatchMaxGames}
+                        </div>
+                      </div>
+                      <div className="form-grid games-create-grid">
+                        <label className="form-group">
+                          Game No
+                          <input value={nextGameNo || ""} readOnly />
+                          <span className="helper-text">Auto per match</span>
+                        </label>
+                        <div className="form-group">
+                          Map
+                          <CustomDropdown
+                            value={gameForm.map_id}
+                            options={addGameMapOptions}
+                            placeholder="Select map"
+                            onChange={(selectedValue) => setGameForm({ map_id: selectedValue })}
+                          />
+                          <span className="helper-text">
+                            Map can be assigned now and revealed later.
+                          </span>
+                        </div>
+                        <div className="form-actions games-create-actions">
+                          <button
+                            type="button"
+                            className="button-primary"
+                            onClick={handleAddGame}
+                          >
+                            Add Game
+                          </button>
+                        </div>
+                      </div>
+                      <div className="helper-text">
+                        Maximum {selectedMatchMaxGames} games for {selectedMatch.mode}.
+                      </div>
+                    </div>
+                  )}
 
-                        <div className="game-record-body">
-                          <div className="game-record-section">
-                            <div className="game-record-label">Sides</div>
-                            <div className="side-stack">
-                              <div className="side-pill side-pill-blue">{blueSideName}</div>
-                              <div className="side-pill side-pill-red">{redSideName}</div>
+                  <div className="games-grid">
+                    {gamesForSelectedMatch.length ? (
+                      gamesForSelectedMatch.map((game) => {
+                        const sides = getGameSides(game.game_no, selectedMatch);
+                        const blueSideName = sides.blueTeamId
+                          ? teamNameById[sides.blueTeamId] || sides.blueTeamId
+                          : "-";
+                        const redSideName = sides.redTeamId
+                          ? teamNameById[sides.redTeamId] || sides.redTeamId
+                          : "-";
+                        const mapValue = mapDrafts[game.id] ?? game.map_id ?? "";
+                        const hasMapChanged =
+                          String(mapDrafts[game.id] ?? "") !== String(game.map_id ?? "");
+                        const isGameFinished =
+                          String(game.status || "").toLowerCase() === "finished";
+                        const isUnnecessaryExtraGame =
+                          isSelectedMatchSeriesComplete && !isGameFinished && !game.winner_team_id;
+
+                        return (
+                          <article key={game.id} className="game-record-card">
+                            <div className="game-record-header">
+                              <div>
+                                <div className="game-record-title">Game {game.game_no}</div>
+                                <div className="helper-text">
+                                  Sides auto-switch on even game numbers.
+                                </div>
+                              </div>
+                              <span className={statusClass(game.status)}>
+                                {game.status || "queued"}
+                              </span>
                             </div>
-                          </div>
 
-                          <div className="game-record-section">
-                            <div className="game-record-label">Map</div>
-                            <div className="map-control">
-                              <div className="map-control-row">
-                                <CustomDropdown
-                                  value={mapValue}
-                                  options={mapOptions}
-                                  placeholder="Select map"
-                                  onChange={(selectedValue) =>
-                                    handleMapDraftChange(game.id, selectedValue)
-                                  }
-                                />
-                                {hasMapChanged ? (
-                                  <button
-                                    type="button"
-                                    className="button-ghost button-compact save-map-btn"
-                                    onClick={() => handleSaveGameMap(game.id)}
-                                  >
-                                    Save Map
-                                  </button>
+                            <div className="game-record-body">
+                              <div className="game-record-section">
+                                <div className="game-record-label">Sides</div>
+                                <div className="side-stack">
+                                  <div className="side-pill side-pill-blue">{blueSideName}</div>
+                                  <div className="side-pill side-pill-red">{redSideName}</div>
+                                </div>
+                              </div>
+
+                              <div className="game-record-section">
+                                <div className="game-record-label">Map</div>
+                                <div className="map-control">
+                                  <div className="map-control-row">
+                                    <CustomDropdown
+                                      value={mapValue}
+                                      options={mapOptions}
+                                      placeholder="Select map"
+                                      onChange={(selectedValue) =>
+                                        handleMapDraftChange(game.id, selectedValue)
+                                      }
+                                    />
+                                    {hasMapChanged ? (
+                                      <button
+                                        type="button"
+                                        className="button-ghost button-compact save-map-btn"
+                                        onClick={() => handleSaveGameMap(game.id)}
+                                      >
+                                        Save Map
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="game-record-section">
+                                <div className="game-record-label">Winner</div>
+                                <div className="winner-label">{getWinnerLabel(game)}</div>
+                                {isUnnecessaryExtraGame ? (
+                                  <div className="helper-text">Series already complete.</div>
                                 ) : null}
                               </div>
                             </div>
-                          </div>
 
-                          <div className="game-record-section">
-                            <div className="game-record-label">Winner</div>
-                            <div className="winner-label">{getWinnerLabel(game)}</div>
-                          </div>
-                        </div>
-
-                        <div className="game-record-actions">
-                          <div className="game-action-group status-actions">
-                            <div className="action-group-label">Status</div>
-                            <div className="action-buttons">
-                              <button
-                                type="button"
-                                className="button-ghost button-setup"
-                                onClick={() => handleGameStatus(game, "setup")}
-                              >
-                                Setup
-                              </button>
-                              <button
-                                type="button"
-                                className="button-success button-start"
-                                onClick={() => handleGameStatus(game, "live")}
-                              >
-                                Start
-                              </button>
-                              <button
-                                type="button"
-                                className="button-warning button-finish"
-                                onClick={() => handleFinishGame(game)}
-                              >
-                                Finish
-                              </button>
+                            <div className="game-record-actions">
+                              <div className="game-action-group status-actions">
+                                <div className="action-group-label">Status</div>
+                                <div className="action-buttons">
+                                  <button
+                                    type="button"
+                                    className="button-ghost button-setup"
+                                    onClick={() => handleGameStatus(game, "setup")}
+                                    disabled={isUnnecessaryExtraGame}
+                                  >
+                                    Setup
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button-success button-start"
+                                    onClick={() => handleGameStatus(game, "live")}
+                                    disabled={isUnnecessaryExtraGame}
+                                  >
+                                    Start
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button-warning button-finish"
+                                    onClick={() => handleFinishGame(game)}
+                                    disabled={isUnnecessaryExtraGame}
+                                  >
+                                    Finish
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="game-action-group scoring-actions">
+                                <div className="action-group-label">Scoring</div>
+                                <div className="action-buttons">
+                                  <button
+                                    type="button"
+                                    className="button-blue button-winner-blue"
+                                    onClick={() =>
+                                      handleWinner(game, sides.blueTeamId, blueSideName)
+                                    }
+                                    disabled={!sides.blueTeamId || isUnnecessaryExtraGame}
+                                  >
+                                    Winner Blue
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button-red button-winner-red"
+                                    onClick={() =>
+                                      handleWinner(game, sides.redTeamId, redSideName)
+                                    }
+                                    disabled={!sides.redTeamId || isUnnecessaryExtraGame}
+                                  >
+                                    Winner Red
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button-ghost button-reset"
+                                    onClick={() => handleResetGameResult(game)}
+                                  >
+                                    Reset
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="game-action-group game-action-group-danger danger-actions">
+                                <div className="action-group-label">Danger</div>
+                                <div className="action-buttons">
+                                  <button
+                                    type="button"
+                                    className="button-danger-outline button-delete"
+                                    onClick={() => handleDeleteGame(game)}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                          <div className="game-action-group scoring-actions">
-                            <div className="action-group-label">Scoring</div>
-                            <div className="action-buttons">
-                              <button
-                                type="button"
-                                className="button-blue button-winner-blue"
-                                onClick={() => handleWinner(game, sides.blueTeamId, blueSideName)}
-                                disabled={!sides.blueTeamId}
-                              >
-                                Winner Blue
-                              </button>
-                              <button
-                                type="button"
-                                className="button-red button-winner-red"
-                                onClick={() => handleWinner(game, sides.redTeamId, redSideName)}
-                                disabled={!sides.redTeamId}
-                              >
-                                Winner Red
-                              </button>
-                              <button
-                                type="button"
-                                className="button-ghost button-reset"
-                                onClick={() => handleResetGameResult(game)}
-                              >
-                                Reset
-                              </button>
-                            </div>
-                          </div>
-                          <div className="game-action-group game-action-group-danger danger-actions">
-                            <div className="action-group-label">Danger</div>
-                            <div className="action-buttons">
-                              <button
-                                type="button"
-                                className="button-danger-outline button-delete"
-                                onClick={() => handleDeleteGame(game)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </article>
-                    );
-                  })
-                ) : (
-                  <div className="modern-card muted">No games yet for this match.</div>
-                )}
+                          </article>
+                        );
+                      })
+                    ) : (
+                      <div className="modern-card muted">No games yet for this match.</div>
+                    )}
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button
+                    type="button"
+                    className="button-ghost"
+                    onClick={() => setIsGamesOpen(false)}
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="modal-footer">
-              <button type="button" className="button-ghost" onClick={() => setIsGamesOpen(false)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </div>,
+            document.body
+          )
+        : null}
 
-      <ConfirmationModal
-        open={confirmState.open}
-        title={confirmState.title}
-        message={confirmState.message}
-        confirmText={confirmState.confirmText}
-        variant={confirmState.variant}
-        onConfirm={confirmState.onConfirm}
-        onCancel={closeConfirm}
-      />
+      {confirmState.open
+        ? createPortal(
+            <ConfirmationModal
+              open={confirmState.open}
+              title={confirmState.title}
+              message={confirmState.message}
+              confirmText={confirmState.confirmText}
+              variant={confirmState.variant}
+              onConfirm={confirmState.onConfirm}
+              onCancel={closeConfirm}
+            />,
+            document.body
+          )
+        : null}
     </div>
   );
 }
 
 export default MatchConfig;
-

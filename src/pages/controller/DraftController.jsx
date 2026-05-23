@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import ConfirmationModal from "../../components/common/ConfirmationModal";
 import {
   createDraftAction,
   deleteDraftAction,
@@ -23,6 +25,15 @@ function DraftController() {
   const [actions, setActions] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [confirmState, setConfirmState] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "",
+    onConfirm: () => {},
+  });
 
   const loadBaseData = async () => {
     const [gameData, heroData] = await Promise.all([getGames(), getHeroes()]);
@@ -47,6 +58,49 @@ function DraftController() {
     loadActions(selectedGameId);
   }, [selectedGameId]);
 
+  const resetForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+  };
+
+  const closeConfirm = () => {
+    setConfirmState((prev) => ({
+      ...prev,
+      open: false,
+      onConfirm: () => {},
+    }));
+  };
+
+  const openConfirm = ({
+    title,
+    message,
+    confirmText = "Confirm",
+    cancelText = "Cancel",
+    variant = "",
+    onConfirm,
+  }) => {
+    setConfirmState({
+      open: true,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      variant,
+      onConfirm,
+    });
+  };
+
+  const saveDraftAction = async (payload) => {
+    if (editingId) {
+      await updateDraftAction(editingId, payload);
+    } else {
+      await createDraftAction(payload);
+    }
+
+    resetForm();
+    await loadActions(selectedGameId);
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!selectedGameId) {
@@ -61,15 +115,18 @@ function DraftController() {
       locked: Boolean(form.locked),
     };
 
-    if (editingId) {
-      await updateDraftAction(editingId, payload);
-    } else {
-      await createDraftAction(payload);
-    }
-
-    setForm(emptyForm);
-    setEditingId(null);
-    await loadActions(selectedGameId);
+    const isEditing = Boolean(editingId);
+    openConfirm({
+      title: isEditing ? "Save Changes" : "Create Draft Action",
+      message: isEditing
+        ? "Apply these changes?"
+        : "Create this draft action with the entered details?",
+      confirmText: isEditing ? "Save Changes" : "Create",
+      onConfirm: async () => {
+        await saveDraftAction(payload);
+        closeConfirm();
+      },
+    });
   };
 
   const handleEdit = (action) => {
@@ -83,12 +140,20 @@ function DraftController() {
     });
   };
 
-  const handleDelete = async (actionId) => {
-    if (!window.confirm("Delete this action?")) {
-      return;
-    }
-    await deleteDraftAction(actionId);
-    await loadActions(selectedGameId);
+  const handleDelete = (action) => {
+    openConfirm({
+      title: "Delete Draft Action",
+      message: `Are you sure you want to delete this ${String(
+        action.action_type || "action"
+      ).toLowerCase()}? This action cannot be undone.`,
+      confirmText: "Delete",
+      variant: "danger",
+      onConfirm: async () => {
+        await deleteDraftAction(action.id);
+        await loadActions(selectedGameId);
+        closeConfirm();
+      },
+    });
   };
 
   const grouped = actions.reduce(
@@ -178,8 +243,7 @@ function DraftController() {
               type="button"
               className="secondary"
               onClick={() => {
-                setEditingId(null);
-                setForm(emptyForm);
+                resetForm();
               }}
             >
               Cancel
@@ -199,7 +263,7 @@ function DraftController() {
                   #{action.action_order} {action.action_type} - {action.hero_name || "-"}
                   <div className="inline-actions">
                     <button onClick={() => handleEdit(action)}>Edit</button>
-                    <button className="secondary" onClick={() => handleDelete(action.id)}>
+                    <button className="secondary" onClick={() => handleDelete(action)}>
                       Delete
                     </button>
                   </div>
@@ -215,7 +279,7 @@ function DraftController() {
                   #{action.action_order} {action.action_type} - {action.hero_name || "-"}
                   <div className="inline-actions">
                     <button onClick={() => handleEdit(action)}>Edit</button>
-                    <button className="secondary" onClick={() => handleDelete(action.id)}>
+                    <button className="secondary" onClick={() => handleDelete(action)}>
                       Delete
                     </button>
                   </div>
@@ -225,6 +289,22 @@ function DraftController() {
           </div>
         </div>
       </section>
+
+      {confirmState.open
+        ? createPortal(
+            <ConfirmationModal
+              open={confirmState.open}
+              title={confirmState.title}
+              message={confirmState.message}
+              confirmText={confirmState.confirmText}
+              cancelText={confirmState.cancelText}
+              variant={confirmState.variant}
+              onConfirm={confirmState.onConfirm}
+              onCancel={closeConfirm}
+            />,
+            document.body
+          )
+        : null}
     </div>
   );
 }

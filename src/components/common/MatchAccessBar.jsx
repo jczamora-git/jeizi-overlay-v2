@@ -23,6 +23,10 @@ function isUpcomingMatch(match) {
   return UPCOMING_STATUSES.includes(normalizeStatus(match?.status));
 }
 
+function isSeriesComplete(match) {
+  return Number(match?.series_completed) === 1;
+}
+
 function formatStatus(status) {
   const value = normalizeStatus(status);
   if (value === "active" || value === "ongoing") {
@@ -53,6 +57,9 @@ function getTimeValue(value) {
 }
 
 function sortFinishedLatestFirst(a, b) {
+  const seriesDiff = getTimeValue(b?.series_completed_at) - getTimeValue(a?.series_completed_at);
+  if (seriesDiff !== 0) return seriesDiff;
+
   const updatedDiff = getTimeValue(b?.updated_at) - getTimeValue(a?.updated_at);
   if (updatedDiff !== 0) return updatedDiff;
 
@@ -144,7 +151,10 @@ function MatchAccessBar() {
   }, [teams]);
 
   const finishedMatches = useMemo(() => {
-    return [...matches].filter(isFinishedMatch).sort(sortFinishedLatestFirst).slice(0, 3);
+    return [...matches]
+      .filter((match) => isFinishedMatch(match) || isSeriesComplete(match))
+      .sort(sortFinishedLatestFirst)
+      .slice(0, 3);
   }, [matches]);
 
   const liveMatches = useMemo(() => {
@@ -233,7 +243,9 @@ function MatchAccessBar() {
                 <div className="match-strip-bottom">
                   <span className="match-strip-score">{scoreText}</span>
                   <span className="match-strip-action">
-                    {getMatchActionLabel(match.status)}
+                    {isSeriesComplete(match)
+                      ? "Series Complete"
+                      : getMatchActionLabel(match.status)}
                   </span>
                 </div>
               </Link>

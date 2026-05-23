@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getCurrentOverlayData } from "../../services/api";
+import { getCurrentOverlayData, getOverlaySettings } from "../../services/api";
 import loadingBg from "../../game_ui/loading.png";
 import { resolveAssetUrl } from "../../utils/assetUrl";
 import "../../styles/overlays/overlay-base.css";
@@ -24,6 +24,34 @@ function LoadingOverlay() {
     red_team: null,
     game: null,
   });
+  const [isLoadingOverlayEnabled, setIsLoadingOverlayEnabled] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSettings = async () => {
+      try {
+        const settings = await getOverlaySettings();
+        if (!isMounted) {
+          return;
+        }
+        setIsLoadingOverlayEnabled(settings?.loading_overlay !== false);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+        setIsLoadingOverlayEnabled(true);
+      }
+    };
+
+    loadSettings();
+    const interval = setInterval(loadSettings, 1000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -49,6 +77,10 @@ function LoadingOverlay() {
       clearInterval(timer);
     };
   }, []);
+
+  if (!isLoadingOverlayEnabled) {
+    return null;
+  }
 
   const match = data.match || {};
   const blueTeam = data.blue_team || {};

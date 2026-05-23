@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../db");
+const { getMaxGamesByMode, recalculateMatchSeriesState } = require("../matchSeries");
 
 const router = express.Router();
 const allowedModes = new Set(["BO1", "BO3", "BO5", "BO7"]);
@@ -31,21 +32,6 @@ function normalizeCasterIds(value) {
 
   const normalized = String(value).trim();
   return normalized || null;
-}
-
-function getMaxGamesByMode(mode) {
-  switch (mode) {
-    case "BO1":
-      return 1;
-    case "BO3":
-      return 3;
-    case "BO5":
-      return 5;
-    case "BO7":
-      return 7;
-    default:
-      return 1;
-  }
 }
 
 router.get("/", async (req, res) => {
@@ -159,6 +145,7 @@ router.post("/", async (req, res) => {
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
+      io.emit("standings:changed");
     }
 
     res.status(201).json({
@@ -251,10 +238,12 @@ router.put("/:id", async (req, res) => {
         id,
       ]
     );
+    await recalculateMatchSeriesState(id);
 
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
+      io.emit("standings:changed");
     }
 
     res.json({ id: Number(id) });
@@ -338,10 +327,12 @@ router.put("/:id/start", async (req, res) => {
 router.put("/:id/finish", async (req, res) => {
   try {
     const { id } = req.params;
+    await recalculateMatchSeriesState(id);
     await pool.query("UPDATE matches SET status = 'finished' WHERE id = ?", [id]);
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
+      io.emit("standings:changed");
     }
 
     res.json({ id: Number(id), status: "finished" });
@@ -397,6 +388,7 @@ router.put("/load-next", async (req, res) => {
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
+      io.emit("standings:changed");
     }
 
     res.json(nextMatch);

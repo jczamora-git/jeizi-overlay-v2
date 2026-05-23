@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import ConfirmationModal from "../../components/common/ConfirmationModal";
 import { createMap, deleteMap, getMaps, updateMap } from "../../services/api";
 import { resolveAssetUrl } from "../../utils/assetUrl";
 
-const emptyForm = { name: "", icon_path: "" };
+const emptyForm = { name: "", icon_path: "", map_image: "" };
 
 function MapConfig() {
   const [maps, setMaps] = useState([]);
@@ -10,8 +12,21 @@ function MapConfig() {
   const [editingId, setEditingId] = useState(null);
   const [iconFile, setIconFile] = useState(null);
   const [iconPreview, setIconPreview] = useState("");
+  const [mapImageFile, setMapImageFile] = useState(null);
+  const [mapImagePreview, setMapImagePreview] = useState("");
   const [brokenIcons, setBrokenIcons] = useState({});
-  const fileInputRef = useRef(null);
+  const [brokenMapImages, setBrokenMapImages] = useState({});
+  const [confirmState, setConfirmState] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "",
+    onConfirm: () => {},
+  });
+  const iconInputRef = useRef(null);
+  const mapImageInputRef = useRef(null);
 
   const loadMaps = async () => {
     const data = await getMaps();
@@ -36,6 +51,67 @@ function MapConfig() {
     };
   }, [iconFile]);
 
+  useEffect(() => {
+    if (!mapImageFile) {
+      setMapImagePreview("");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(mapImageFile);
+    setMapImagePreview(previewUrl);
+
+    return () => {
+      URL.revokeObjectURL(previewUrl);
+    };
+  }, [mapImageFile]);
+
+  const resetForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+    setIconFile(null);
+    setIconPreview("");
+    setMapImageFile(null);
+    setMapImagePreview("");
+  };
+
+  const closeConfirm = () => {
+    setConfirmState((prev) => ({
+      ...prev,
+      open: false,
+      onConfirm: () => {},
+    }));
+  };
+
+  const openConfirm = ({
+    title,
+    message,
+    confirmText = "Confirm",
+    cancelText = "Cancel",
+    variant = "",
+    onConfirm,
+  }) => {
+    setConfirmState({
+      open: true,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      variant,
+      onConfirm,
+    });
+  };
+
+  const saveMap = async (payload) => {
+    if (editingId) {
+      await updateMap(editingId, payload);
+    } else {
+      await createMap(payload);
+    }
+
+    resetForm();
+    await loadMaps();
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.name.trim()) {
@@ -44,41 +120,58 @@ function MapConfig() {
 
     const payload = new FormData();
     payload.append("name", form.name);
-    if (iconFile) {
-      payload.append("icon", iconFile);
-    } else if (form.icon_path) {
+
+    if (form.icon_path) {
       payload.append("icon_path", form.icon_path);
     }
 
-    if (editingId) {
-      await updateMap(editingId, payload);
-    } else {
-      await createMap(payload);
+    if (iconFile) {
+      payload.append("icon", iconFile);
     }
 
-    setForm(emptyForm);
-    setEditingId(null);
-    setIconFile(null);
-    setIconPreview("");
-    await loadMaps();
+    if (mapImageFile) {
+      payload.append("map_image", mapImageFile);
+    }
+
+    const isEditing = Boolean(editingId);
+    openConfirm({
+      title: isEditing ? "Save Changes" : "Create Map",
+      message: isEditing ? "Apply these changes?" : "Create this map with the entered details?",
+      confirmText: isEditing ? "Save Changes" : "Create",
+      onConfirm: async () => {
+        await saveMap(payload);
+        closeConfirm();
+      },
+    });
   };
 
   const handleEdit = (map) => {
     setForm({
       name: map.name || "",
       icon_path: map.icon_path || "",
+      map_image: map.map_image || "",
     });
     setEditingId(map.id);
     setIconFile(null);
     setIconPreview("");
+    setMapImageFile(null);
+    setMapImagePreview("");
   };
 
   const handleIconPick = () => {
-    fileInputRef.current?.click();
+    iconInputRef.current?.click();
+  };
+
+  const handleMapImagePick = () => {
+    mapImageInputRef.current?.click();
   };
 
   const handleIconChange = (event) => {
     setIconFile(event.target.files?.[0] || null);
+  };
+
+  const handleMapImageChange = (event) => {
+    setMapImageFile(event.target.files?.[0] || null);
   };
 
   const handleRemoveIcon = (event) => {
@@ -86,15 +179,27 @@ function MapConfig() {
     setIconFile(null);
   };
 
-  const previewUrl = iconPreview || resolveAssetUrl(form.icon_path);
-
-  const handleDelete = async (mapId) => {
-    if (!window.confirm("Delete this map?")) {
-      return;
-    }
-    await deleteMap(mapId);
-    await loadMaps();
+  const handleRemoveMapImage = (event) => {
+    event.stopPropagation();
+    setMapImageFile(null);
   };
+
+  const handleDelete = (map) => {
+    openConfirm({
+      title: "Delete Map",
+      message: `Are you sure you want to delete ${map.name}? This action cannot be undone.`,
+      confirmText: "Delete",
+      variant: "danger",
+      onConfirm: async () => {
+        await deleteMap(map.id);
+        await loadMaps();
+        closeConfirm();
+      },
+    });
+  };
+
+  const iconPreviewUrl = iconPreview || resolveAssetUrl(form.icon_path);
+  const mapImagePreviewUrl = mapImagePreview || resolveAssetUrl(form.map_image);
 
   return (
     <div className="controller-page">
@@ -112,7 +217,7 @@ function MapConfig() {
         <label>
           Map Icon Upload
           <input
-            ref={fileInputRef}
+            ref={iconInputRef}
             type="file"
             accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
             style={{ display: "none" }}
@@ -130,9 +235,9 @@ function MapConfig() {
               }
             }}
           >
-            {previewUrl ? (
+            {iconPreviewUrl ? (
               <div className="custom-upload-preview">
-                <img className="upload-thumb" src={previewUrl} alt="Map preview" />
+                <img className="upload-thumb" src={iconPreviewUrl} alt="Map icon preview" />
                 <div className="upload-file-name">
                   {iconFile ? iconFile.name : "Using saved icon"}
                 </div>
@@ -141,11 +246,15 @@ function MapConfig() {
               <div className="custom-upload-placeholder">Choose Map Icon</div>
             )}
             <div className="custom-upload-actions">
-              <button type="button" className="btn-upload" onClick={(event) => {
-                event.stopPropagation();
-                handleIconPick();
-              }}>
-                {previewUrl ? "Change" : "Choose Map Icon"}
+              <button
+                type="button"
+                className="btn-upload"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleIconPick();
+                }}
+              >
+                {iconPreviewUrl ? "Change" : "Choose Map Icon"}
               </button>
               {iconFile && (
                 <button type="button" className="btn-remove" onClick={handleRemoveIcon}>
@@ -163,16 +272,67 @@ function MapConfig() {
             placeholder="/uploads/maps/map.png"
           />
         </label>
+        <label>
+          Map Image Upload
+          <input
+            ref={mapImageInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+            style={{ display: "none" }}
+            onChange={handleMapImageChange}
+          />
+          <div
+            className="custom-upload"
+            role="button"
+            tabIndex={0}
+            onClick={handleMapImagePick}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                handleMapImagePick();
+              }
+            }}
+          >
+            {mapImagePreviewUrl ? (
+              <div className="custom-upload-preview">
+                <img
+                  className="upload-thumb upload-thumb-wide"
+                  src={mapImagePreviewUrl}
+                  alt="Map image preview"
+                />
+                <div className="upload-file-name">
+                  {mapImageFile ? mapImageFile.name : "Using saved map image"}
+                </div>
+              </div>
+            ) : (
+              <div className="custom-upload-placeholder">Choose Map Image</div>
+            )}
+            <div className="custom-upload-actions">
+              <button
+                type="button"
+                className="btn-upload"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleMapImagePick();
+                }}
+              >
+                {mapImagePreviewUrl ? "Change" : "Choose Map Image"}
+              </button>
+              {mapImageFile && (
+                <button type="button" className="btn-remove" onClick={handleRemoveMapImage}>
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+        </label>
         <div className="form-actions">
           <button type="submit">{editingId ? "Save" : "Add Map"}</button>
           {editingId && (
             <button
               type="button"
               className="secondary"
-              onClick={() => {
-                setEditingId(null);
-                setForm(emptyForm);
-              }}
+              onClick={resetForm}
             >
               Cancel
             </button>
@@ -188,6 +348,7 @@ function MapConfig() {
               <th>ID</th>
               <th>Name</th>
               <th>Icon</th>
+              <th>Map Image</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -221,8 +382,32 @@ function MapConfig() {
                   )}
                 </td>
                 <td>
+                  {map.map_image ? (
+                    <>
+                      {!brokenMapImages[map.id] && (
+                        <img
+                          className="table-image-preview table-image-preview-wide"
+                          src={resolveAssetUrl(map.map_image)}
+                          alt={`${map.name} map image`}
+                          onError={(event) => {
+                            event.currentTarget.style.display = "none";
+                            setBrokenMapImages((prev) => ({ ...prev, [map.id]: true }));
+                          }}
+                        />
+                      )}
+                      {brokenMapImages[map.id] && (
+                        <div className="table-image-placeholder">
+                          {resolveAssetUrl(map.map_image)}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="table-image-placeholder">No Map Image</span>
+                  )}
+                </td>
+                <td>
                   <button onClick={() => handleEdit(map)}>Edit</button>
-                  <button className="secondary" onClick={() => handleDelete(map.id)}>
+                  <button className="secondary" onClick={() => handleDelete(map)}>
                     Delete
                   </button>
                 </td>
@@ -231,6 +416,22 @@ function MapConfig() {
           </tbody>
         </table>
       </section>
+
+      {confirmState.open
+        ? createPortal(
+            <ConfirmationModal
+              open={confirmState.open}
+              title={confirmState.title}
+              message={confirmState.message}
+              confirmText={confirmState.confirmText}
+              cancelText={confirmState.cancelText}
+              variant={confirmState.variant}
+              onConfirm={confirmState.onConfirm}
+              onCancel={closeConfirm}
+            />,
+            document.body
+          )
+        : null}
     </div>
   );
 }

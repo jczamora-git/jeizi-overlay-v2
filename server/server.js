@@ -12,6 +12,9 @@ const mapsRoutes = require("./routes/maps.routes");
 const heroesRoutes = require("./routes/heroes.routes");
 const draftRoutes = require("./routes/draft.routes");
 const castersRoutes = require("./routes/casters.routes");
+const overlaySettingsRoutes = require("./routes/overlay-settings.routes");
+const scheduleRoutes = require("./routes/schedule.routes");
+const standingsRoutes = require("./routes/standings.routes");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -36,12 +39,49 @@ app.use("/api/maps", mapsRoutes);
 app.use("/api/heroes", heroesRoutes);
 app.use("/api/draft", draftRoutes);
 app.use("/api/casters", castersRoutes);
+app.use("/api/overlay-settings", overlaySettingsRoutes);
+app.use("/api/schedule", scheduleRoutes);
+app.use("/api/standings", standingsRoutes);
 
 app.get("/api/current-overlay-data", async (req, res) => {
   try {
-    const [matchRows] = await pool.query(
-      "SELECT * FROM matches WHERE status IN ('active','live') ORDER BY queue_order ASC LIMIT 1"
+    let [matchRows] = await pool.query(
+      `SELECT *
+       FROM matches
+       WHERE LOWER(status) IN ('live', 'active', 'ongoing')
+       ORDER BY COALESCE(queue_order, 999999) ASC, updated_at DESC, id DESC
+       LIMIT 1`
     );
+
+    if (!matchRows.length) {
+      [matchRows] = await pool.query(
+        `SELECT *
+         FROM matches
+         WHERE series_completed = 1
+         ORDER BY series_completed_at DESC, updated_at DESC, id DESC
+         LIMIT 1`
+      );
+    }
+
+    if (!matchRows.length) {
+      [matchRows] = await pool.query(
+        `SELECT *
+         FROM matches
+         WHERE LOWER(status) IN ('finished', 'done', 'completed')
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1`
+      );
+    }
+
+    if (!matchRows.length) {
+      [matchRows] = await pool.query(
+        `SELECT *
+         FROM matches
+         ORDER BY updated_at DESC, created_at DESC, id DESC
+         LIMIT 1`
+      );
+    }
+
     const match = matchRows[0] || null;
 
     let blueTeam = null;
@@ -74,7 +114,13 @@ app.get("/api/current-overlay-data", async (req, res) => {
       game = gameRows[0] || null;
 
       const [finishedGameRows] = await pool.query(
-        "SELECT * FROM games WHERE match_id = ? AND status = 'finished' AND winner_team_id IS NOT NULL ORDER BY game_no DESC, updated_at DESC, id DESC LIMIT 1",
+        `SELECT *
+         FROM games
+         WHERE match_id = ?
+           AND LOWER(status) = 'finished'
+           AND winner_team_id IS NOT NULL
+         ORDER BY finished_at DESC, game_no DESC, updated_at DESC, id DESC
+         LIMIT 1`,
         [match.id]
       );
       latestFinishedGame = finishedGameRows[0] || null;

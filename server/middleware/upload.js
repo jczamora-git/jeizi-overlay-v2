@@ -68,10 +68,11 @@ const uploadHeroImage = createUploader("heroes", (req, file) => {
   return `${slug}_hero_${Date.now()}${ext}`;
 });
 
-const uploadMapIcon = createUploader("maps", (req, file) => {
+const uploadMapAssets = createUploader("maps", (req, file) => {
   const slug = createSlug(req.body?.name, "map");
   const ext = path.extname(file.originalname).toLowerCase();
-  return `${slug}_map_${Date.now()}${ext}`;
+  const suffix = file.fieldname === "map_image" ? "image" : "icon";
+  return `${slug}_map_${suffix}_${Date.now()}${ext}`;
 });
 
 const uploadCasterPhoto = createUploader("casters", (req, file) => {
@@ -83,6 +84,6 @@ const uploadCasterPhoto = createUploader("casters", (req, file) => {
 module.exports = {
   uploadTeamLogo,
   uploadHeroImage,
-  uploadMapIcon,
+  uploadMapAssets,
   uploadCasterPhoto,
 };

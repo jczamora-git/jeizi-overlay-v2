@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import ConfirmationModal from "../../components/common/ConfirmationModal";
+import Toast from "../../components/common/Toast";
 import { createTeam, deleteTeam, getTeams, updateTeam } from "../../services/api";
 import { resolveAssetUrl } from "../../utils/assetUrl";
 
@@ -11,11 +14,27 @@ function TeamConfig() {
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState("");
   const [brokenLogos, setBrokenLogos] = useState({});
+  const [toast, setToast] = useState({ message: "", type: "info" });
+  const [confirmState, setConfirmState] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "",
+    onConfirm: () => {},
+  });
   const fileInputRef = useRef(null);
 
   const loadTeams = async () => {
     const data = await getTeams();
     setTeams(data);
+  };
+
+  const closeToast = () => setToast({ message: "", type: "info" });
+
+  const showToast = (message, type = "info") => {
+    setToast({ message, type });
   };
 
   useEffect(() => {
@@ -36,6 +55,53 @@ function TeamConfig() {
     };
   }, [logoFile]);
 
+  const resetForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+    setLogoFile(null);
+    setLogoPreview("");
+  };
+
+  const closeConfirm = () => {
+    setConfirmState((prev) => ({
+      ...prev,
+      open: false,
+      onConfirm: () => {},
+    }));
+  };
+
+  const openConfirm = ({
+    title,
+    message,
+    confirmText = "Confirm",
+    cancelText = "Cancel",
+    variant = "",
+    onConfirm,
+  }) => {
+    setConfirmState({
+      open: true,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      variant,
+      onConfirm,
+    });
+  };
+
+  const saveTeam = async (payload) => {
+    if (editingId) {
+      await updateTeam(editingId, payload);
+      showToast("Team updated.", "success");
+    } else {
+      await createTeam(payload);
+      showToast("Team created.", "success");
+    }
+
+    resetForm();
+    await loadTeams();
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.name.trim()) {
@@ -53,17 +119,18 @@ function TeamConfig() {
       payload.append("logo", form.logoPath);
     }
 
-    if (editingId) {
-      await updateTeam(editingId, payload);
-    } else {
-      await createTeam(payload);
-    }
-
-    setForm(emptyForm);
-    setEditingId(null);
-    setLogoFile(null);
-    setLogoPreview("");
-    await loadTeams();
+    const isEditing = Boolean(editingId);
+    openConfirm({
+      title: isEditing ? "Save Changes" : "Create Team",
+      message: isEditing
+        ? "Apply these changes?"
+        : "Create this team with the entered details?",
+      confirmText: isEditing ? "Save Changes" : "Create",
+      onConfirm: async () => {
+        await saveTeam(payload);
+        closeConfirm();
+      },
+    });
   };
 
   const handleEdit = (team) => {
@@ -92,16 +159,36 @@ function TeamConfig() {
 
   const previewUrl = logoPreview || resolveAssetUrl(form.logoPath);
 
-  const handleDelete = async (teamId) => {
-    if (!window.confirm("Delete this team?")) {
-      return;
-    }
-    await deleteTeam(teamId);
-    await loadTeams();
+  const handleDelete = (team) => {
+    openConfirm({
+      title: "Delete Team",
+      message: `Are you sure you want to delete ${team.name}? This action cannot be undone.`,
+      confirmText: "Delete",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          const result = await deleteTeam(team.id);
+          await loadTeams();
+          showToast(
+            result?.deleted_match_count
+              ? "Team deleted. Related matches were also removed."
+              : "Team deleted.",
+            "success"
+          );
+          closeConfirm();
+        } catch (error) {
+          showToast(error?.message || "Failed to delete team.", "error");
+        }
+      },
+    });
   };
 
   return (
     <div className="controller-page">
+      <div className="toast-container">
+        <Toast message={toast.message} type={toast.type} onClose={closeToast} />
+      </div>
+
       <h1>Teams</h1>
 
       <form className="panel form-grid" onSubmit={handleSubmit}>
@@ -181,8 +268,7 @@ function TeamConfig() {
               type="button"
               className="secondary"
               onClick={() => {
-                setEditingId(null);
-                setForm(emptyForm);
+                resetForm();
               }}
             >
               Cancel
@@ -235,7 +321,7 @@ function TeamConfig() {
                 </td>
                 <td>
                   <button onClick={() => handleEdit(team)}>Edit</button>
-                  <button className="secondary" onClick={() => handleDelete(team.id)}>
+                  <button className="secondary" onClick={() => handleDelete(team)}>
                     Delete
                   </button>
                 </td>
@@ -244,6 +330,22 @@ function TeamConfig() {
           </tbody>
         </table>
       </section>
+
+      {confirmState.open
+        ? createPortal(
+            <ConfirmationModal
+              open={confirmState.open}
+              title={confirmState.title}
+              message={confirmState.message}
+              confirmText={confirmState.confirmText}
+              cancelText={confirmState.cancelText}
+              variant={confirmState.variant}
+              onConfirm={confirmState.onConfirm}
+              onCancel={closeConfirm}
+            />,
+            document.body
+          )
+        : null}
     </div>
   );
 }

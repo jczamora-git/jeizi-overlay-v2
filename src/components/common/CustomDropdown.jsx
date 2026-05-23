@@ -74,7 +74,7 @@ function CustomDropdown({
         width: menuWidth,
         minWidth: menuWidth,
         maxWidth: menuWidth,
-        zIndex: 99999,
+        zIndex: 902001,
       });
     };
 

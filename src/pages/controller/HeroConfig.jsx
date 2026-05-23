@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import ConfirmationModal from "../../components/common/ConfirmationModal";
 import { createHero, deleteHero, getHeroes, updateHero } from "../../services/api";
 import { resolveAssetUrl } from "../../utils/assetUrl";
 
@@ -11,6 +13,15 @@ function HeroConfig() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState("");
   const [brokenImages, setBrokenImages] = useState({});
+  const [confirmState, setConfirmState] = useState({
+    open: false,
+    title: "",
+    message: "",
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "",
+    onConfirm: () => {},
+  });
   const fileInputRef = useRef(null);
 
   const loadHeroes = async () => {
@@ -36,6 +47,51 @@ function HeroConfig() {
     };
   }, [imageFile]);
 
+  const resetForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+    setImageFile(null);
+    setImagePreview("");
+  };
+
+  const closeConfirm = () => {
+    setConfirmState((prev) => ({
+      ...prev,
+      open: false,
+      onConfirm: () => {},
+    }));
+  };
+
+  const openConfirm = ({
+    title,
+    message,
+    confirmText = "Confirm",
+    cancelText = "Cancel",
+    variant = "",
+    onConfirm,
+  }) => {
+    setConfirmState({
+      open: true,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      variant,
+      onConfirm,
+    });
+  };
+
+  const saveHero = async (payload) => {
+    if (editingId) {
+      await updateHero(editingId, payload);
+    } else {
+      await createHero(payload);
+    }
+
+    resetForm();
+    await loadHeroes();
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!form.name.trim()) {
@@ -52,17 +108,16 @@ function HeroConfig() {
       payload.append("image", imageFile);
     }
 
-    if (editingId) {
-      await updateHero(editingId, payload);
-    } else {
-      await createHero(payload);
-    }
-
-    setForm(emptyForm);
-    setEditingId(null);
-    setImageFile(null);
-    setImagePreview("");
-    await loadHeroes();
+    const isEditing = Boolean(editingId);
+    openConfirm({
+      title: isEditing ? "Save Changes" : "Create Hero",
+      message: isEditing ? "Apply these changes?" : "Create this hero with the entered details?",
+      confirmText: isEditing ? "Save Changes" : "Create",
+      onConfirm: async () => {
+        await saveHero(payload);
+        closeConfirm();
+      },
+    });
   };
 
   const handleEdit = (hero) => {
@@ -91,12 +146,18 @@ function HeroConfig() {
 
   const previewUrl = imagePreview || resolveAssetUrl(form.image_path);
 
-  const handleDelete = async (heroId) => {
-    if (!window.confirm("Delete this hero?")) {
-      return;
-    }
-    await deleteHero(heroId);
-    await loadHeroes();
+  const handleDelete = (hero) => {
+    openConfirm({
+      title: "Delete Hero",
+      message: `Are you sure you want to delete ${hero.name}? This action cannot be undone.`,
+      confirmText: "Delete",
+      variant: "danger",
+      onConfirm: async () => {
+        await deleteHero(hero.id);
+        await loadHeroes();
+        closeConfirm();
+      },
+    });
   };
 
   return (
@@ -180,8 +241,7 @@ function HeroConfig() {
               type="button"
               className="secondary"
               onClick={() => {
-                setEditingId(null);
-                setForm(emptyForm);
+                resetForm();
               }}
             >
               Cancel
@@ -234,7 +294,7 @@ function HeroConfig() {
                 </td>
                 <td>
                   <button onClick={() => handleEdit(hero)}>Edit</button>
-                  <button className="secondary" onClick={() => handleDelete(hero.id)}>
+                  <button className="secondary" onClick={() => handleDelete(hero)}>
                     Delete
                   </button>
                 </td>
@@ -243,6 +303,22 @@ function HeroConfig() {
           </tbody>
         </table>
       </section>
+
+      {confirmState.open
+        ? createPortal(
+            <ConfirmationModal
+              open={confirmState.open}
+              title={confirmState.title}
+              message={confirmState.message}
+              confirmText={confirmState.confirmText}
+              cancelText={confirmState.cancelText}
+              variant={confirmState.variant}
+              onConfirm={confirmState.onConfirm}
+              onCancel={closeConfirm}
+            />,
+            document.body
+          )
+        : null}
     </div>
   );
 }

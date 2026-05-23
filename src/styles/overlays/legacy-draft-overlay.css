@@ -149,6 +149,75 @@
   text-transform: uppercase;
 }
 
+.legacy-draft-map-name {
+  position: absolute;
+  left: 50%;
+  top: 770px;
+  transform: translateX(-50%);
+  z-index: 60;
+  width: 420px;
+  text-align: center;
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 700;
+  font-family: "CMO Xeroda", Arial, sans-serif;
+  letter-spacing: 1px;
+  color: #ff5400;
+  text-transform: uppercase;
+  /* text-shadow: 0 4px 10px rgba(0, 0, 0, 0.65); */
+  pointer-events: none;
+}
+
+.legacy-draft-map-image,
+.legacy-draft-map-image-slot {
+  position: absolute;
+  left: 50%;
+  top: 820px;
+  transform: translateX(-50%);
+  z-index: 59;
+  width: 330px;
+  height: 160px;
+  object-fit: cover;
+  object-position: center;
+  border: 4px solid #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  background: rgba(10, 10, 10, 0.85);
+  pointer-events: none;
+}
+
+.legacy-draft-map-image-slot {
+  overflow: hidden;
+  filter: grayscale(100%);
+  padding: 0;
+}
+
+.legacy-draft-map-slot-reel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  animation: legacyDraftMapSlotRoll 1.2s linear infinite;
+}
+
+.legacy-draft-map-slot-image {
+  width: 100%;
+  height: 110px;
+  flex: 0 0 110px;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+
+@keyframes legacyDraftMapSlotRoll {
+  0% {
+    transform: translateY(0);
+  }
+
+  100% {
+    transform: translateY(-50%);
+  }
+}
+
 .legacy-draft-blue-indicators {
   position: absolute;
   left: 653px;

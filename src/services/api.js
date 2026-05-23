@@ -1,4 +1,5 @@
-const API_BASE = "/api";
+const API_ORIGIN = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_ORIGIN || "http://localhost:3000";
+const API_BASE = `${API_ORIGIN.replace(/\/$/, "").replace(/\/api$/, "")}/api`;
 
 const cleanErrorMessage = (text, response) => {
   if (!text) {
@@ -17,17 +18,37 @@ const cleanErrorMessage = (text, response) => {
     if (looksLikeHtml) {
       return `Request failed: ${response.status} ${response.statusText}`;
     }
+
+    if (
+      response.status >= 400 &&
+      (/^Cannot\s+/i.test(text) || response.status === 404 || response.status === 405)
+    ) {
+      return `Request failed: ${response.status} ${response.statusText}`;
+    }
+
     return text;
   }
 };
 
 async function request(path, options = {}) {
   const isFormData = options.body instanceof FormData;
-  const headers = isFormData ? options.headers : { "Content-Type": "application/json" };
+  const headers = { ...(options.headers || {}) };
+
+  if (!isFormData) {
+    headers["Content-Type"] = headers["Content-Type"] || "application/json";
+  }
+
+  const body =
+    options.body === undefined
+      ? undefined
+      : isFormData || typeof options.body === "string"
+        ? options.body
+        : JSON.stringify(options.body);
 
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
+    body,
   });
 
   if (!response.ok) {
@@ -129,3 +150,13 @@ export const updateDraftAction = (id, payload) =>
 export const deleteDraftAction = (id) => request(`/draft/${id}`, { method: "DELETE" });
 
 export const getCurrentOverlayData = () => request("/current-overlay-data");
+export const getSchedule = () => request("/schedule");
+
+export const getOverlaySettings = () => request("/overlay-settings");
+export const updateOverlaySetting = (overlayKey, isEnabled) =>
+  request(`/overlay-settings/${overlayKey}`, {
+    method: "PUT",
+    body: JSON.stringify({ is_enabled: isEnabled }),
+  });
+
+export const getStandings = () => request("/standings");

@@ -1,63 +1,18 @@
 const express = require("express");
 const { pool } = require("../db");
+const {
+  getMaxGamesByMode,
+  recalculateMatchSeriesState,
+} = require("../matchSeries");
 
 const router = express.Router();
-
-function getMaxGamesByMode(mode) {
-  switch (mode) {
-    case "BO1":
-      return 1;
-    case "BO3":
-      return 3;
-    case "BO5":
-      return 5;
-    case "BO7":
-      return 7;
-    default:
-      return 1;
-  }
-}
-
-async function recalculateMatchScore(matchId) {
-  if (!matchId) {
-    return;
-  }
-
-  const [matchRows] = await pool.query(
-    "SELECT blue_team_id, red_team_id FROM matches WHERE id = ?",
-    [matchId]
-  );
-  const match = matchRows[0];
-  if (!match) {
-    return;
-  }
-
-  const [winnerRows] = await pool.query(
-    "SELECT winner_team_id FROM games WHERE match_id = ? AND winner_team_id IS NOT NULL",
-    [matchId]
-  );
-
-  let blueScore = 0;
-  let redScore = 0;
-  winnerRows.forEach((row) => {
-    if (String(row.winner_team_id) === String(match.blue_team_id)) {
-      blueScore += 1;
-    } else if (String(row.winner_team_id) === String(match.red_team_id)) {
-      redScore += 1;
-    }
-  });
-
-  await pool.query(
-    "UPDATE matches SET blue_score = ?, red_score = ? WHERE id = ?",
-    [blueScore, redScore, matchId]
-  );
-}
 
 router.get("/", async (req, res) => {
   try {
     const [rows] = await pool.query(
-      "SELECT g.id, g.match_id, g.game_no, g.map_id, g.status, g.winner_team_id, " +
+      "SELECT g.id, g.match_id, g.game_no, g.map_id, g.status, g.winner_team_id, g.finished_at, g.updated_at, " +
         "m.match_no, m.title AS match_title, m.blue_team_id, m.red_team_id, " +
+        "m.mode, m.series_completed, m.series_winner_team_id, " +
         "bt.name AS blue_team_name, rt.name AS red_team_name, " +
         "mp.name AS map_name " +
         "FROM games g " +
@@ -103,10 +58,16 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "match_id is required" });
     }
 
-    const [matchRows] = await pool.query("SELECT mode FROM matches WHERE id = ?", [match_id]);
+    const [matchRows] = await pool.query(
+      "SELECT mode, series_completed FROM matches WHERE id = ?",
+      [match_id]
+    );
     const match = matchRows[0];
     if (!match) {
       return res.status(404).json({ message: "Match not found" });
+    }
+    if (Number(match.series_completed) === 1) {
+      return res.status(400).json({ message: "Series already complete." });
     }
 
     const [countRows] = await pool.query(
@@ -147,11 +108,13 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
+  const connection = await pool.getConnection();
   try {
     const { id } = req.params;
     const { match_id, game_no, map_id, status, winner_team_id } = req.body;
     const fields = [];
     const values = [];
+    const inlineFields = [];
 
     if (match_id !== undefined) {
       fields.push("match_id = ?");
@@ -168,37 +131,126 @@ router.put("/:id", async (req, res) => {
     if (status !== undefined) {
       fields.push("status = ?");
       values.push(status);
+      if (String(status).toLowerCase() === "finished") {
+        inlineFields.push("finished_at = COALESCE(finished_at, NOW())");
+      } else {
+        inlineFields.push("finished_at = NULL");
+      }
     }
     if (Object.prototype.hasOwnProperty.call(req.body, "winner_team_id")) {
       fields.push("winner_team_id = ?");
       values.push(winner_team_id || null);
     }
+    inlineFields.push("updated_at = NOW()");
 
     if (!fields.length) {
       return res.status(400).json({ message: "No fields to update" });
     }
 
-    values.push(id);
-    await pool.query(`UPDATE games SET ${fields.join(", ")} WHERE id = ?`, values);
+    await connection.beginTransaction();
 
-    if (Object.prototype.hasOwnProperty.call(req.body, "winner_team_id")) {
-      let matchId = match_id;
-      if (!matchId) {
-        const [rows] = await pool.query("SELECT match_id FROM games WHERE id = ?", [id]);
-        matchId = rows[0]?.match_id;
-      }
-      await recalculateMatchScore(matchId);
+    const [gameRows] = await connection.query(
+      `SELECT g.id, g.match_id, g.winner_team_id, g.status, m.series_completed,
+              m.id AS parent_match_id, m.status AS match_status
+       FROM games g
+       LEFT JOIN matches m ON m.id = g.match_id
+       WHERE g.id = ?
+       LIMIT 1`,
+      [id]
+    );
+    const existingGame = gameRows[0];
+    if (!existingGame) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Game not found" });
     }
+
+    const resolvedMatchId = match_id ?? existingGame.match_id;
+    const nextStatus = status ?? existingGame.status;
+    const isSettingWinner = Object.prototype.hasOwnProperty.call(req.body, "winner_team_id");
+    const isSeriesComplete = Number(existingGame.series_completed) === 1;
+    const alreadyHasWinner = existingGame.winner_team_id != null;
+    const isStartingGame =
+      String(nextStatus || "").toLowerCase() === "live" &&
+      String(existingGame.status || "").toLowerCase() !== "live";
+
+    if (
+      isSeriesComplete &&
+      String(nextStatus || "").toLowerCase() === "live" &&
+      String(existingGame.status || "").toLowerCase() !== "live"
+    ) {
+      await connection.rollback();
+      return res.status(400).json({ message: "Series already complete." });
+    }
+
+    if (isSeriesComplete && isSettingWinner && !alreadyHasWinner && winner_team_id) {
+      await connection.rollback();
+      return res.status(400).json({ message: "Series already complete." });
+    }
+
+    if (isStartingGame) {
+      const [liveMatchRows] = await connection.query(
+        `SELECT id, series_completed
+         FROM matches
+         WHERE id <> ?
+           AND LOWER(status) IN ('live', 'active', 'ongoing')`,
+        [resolvedMatchId]
+      );
+
+      const blockingMatch = liveMatchRows.find(
+        (match) => Number(match.series_completed) !== 1
+      );
+      if (blockingMatch) {
+        await connection.rollback();
+        return res.status(409).json({
+          message:
+            "Another match is currently live. Finish or complete it before starting another match.",
+        });
+      }
+
+      if (liveMatchRows.length) {
+        const completedLiveIds = liveMatchRows.map((match) => match.id);
+        const placeholders = completedLiveIds.map(() => "?").join(",");
+        await connection.query(
+          `UPDATE matches
+           SET status = 'finished',
+               updated_at = NOW()
+           WHERE id IN (${placeholders})`,
+          completedLiveIds
+        );
+      }
+
+      await connection.query(
+        `UPDATE matches
+         SET status = 'live',
+             updated_at = NOW()
+         WHERE id = ?`,
+        [resolvedMatchId]
+      );
+    }
+
+    values.push(id);
+    const assignments = [...fields, ...inlineFields];
+    await connection.query(`UPDATE games SET ${assignments.join(", ")} WHERE id = ?`, values);
+
+    if (status !== undefined || isSettingWinner) {
+      await recalculateMatchSeriesState(resolvedMatchId, connection);
+    }
+
+    await connection.commit();
 
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
+      io.emit("standings:changed");
     }
 
     res.json({ id: Number(id) });
   } catch (error) {
+    await connection.rollback();
     console.error("Failed to update game", error);
     res.status(500).json({ message: "Failed to update game" });
+  } finally {
+    connection.release();
   }
 });
 
@@ -220,11 +272,13 @@ router.put("/:id/set-active", async (req, res) => {
       [game.match_id]
     );
     await connection.query("UPDATE games SET status = 'setup' WHERE id = ?", [id]);
+    await recalculateMatchSeriesState(game.match_id, connection);
 
     await connection.commit();
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
+      io.emit("standings:changed");
     }
 
     res.json({ id: Number(id), status: "setup" });
@@ -238,58 +292,88 @@ router.put("/:id/set-active", async (req, res) => {
 });
 
 router.put("/:id/winner", async (req, res) => {
+  const connection = await pool.getConnection();
   try {
     const { id } = req.params;
     const { winner_team_id } = req.body;
-    const [gameRows] = await pool.query("SELECT match_id FROM games WHERE id = ?", [id]);
+    await connection.beginTransaction();
+
+    const [gameRows] = await connection.query(
+      `SELECT g.match_id, g.winner_team_id, m.series_completed
+       FROM games g
+       LEFT JOIN matches m ON m.id = g.match_id
+       WHERE g.id = ?
+       LIMIT 1`,
+      [id]
+    );
     const game = gameRows[0];
     if (!game) {
+      await connection.rollback();
       return res.status(404).json({ message: "Game not found" });
     }
+    if (Number(game.series_completed) === 1 && game.winner_team_id == null) {
+      await connection.rollback();
+      return res.status(400).json({ message: "Series already complete." });
+    }
 
-    await pool.query("UPDATE games SET winner_team_id = ?, status = 'finished' WHERE id = ?", [
-      winner_team_id || null,
-      id,
-    ]);
+    await connection.query(
+      "UPDATE games SET winner_team_id = ?, status = 'finished', finished_at = NOW(), updated_at = NOW() WHERE id = ?",
+      [winner_team_id || null, id]
+    );
 
-    await recalculateMatchScore(game.match_id);
+    await recalculateMatchSeriesState(game.match_id, connection);
+    await connection.commit();
 
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
+      io.emit("standings:changed");
     }
 
     res.json({ id: Number(id), winner_team_id, status: "finished" });
   } catch (error) {
+    await connection.rollback();
     console.error("Failed to set game winner", error);
     res.status(500).json({ message: "Failed to set game winner" });
+  } finally {
+    connection.release();
   }
 });
 
 router.put("/:id/reset-result", async (req, res) => {
+  const connection = await pool.getConnection();
   try {
     const { id } = req.params;
-    const [gameRows] = await pool.query("SELECT match_id FROM games WHERE id = ?", [id]);
+    await connection.beginTransaction();
+
+    const [gameRows] = await connection.query("SELECT match_id FROM games WHERE id = ?", [id]);
     const game = gameRows[0];
     if (!game) {
+      await connection.rollback();
       return res.status(404).json({ message: "Game not found" });
     }
 
-    await pool.query("UPDATE games SET winner_team_id = NULL, status = 'setup' WHERE id = ?", [
-      id,
-    ]);
+    await connection.query(
+      "UPDATE games SET winner_team_id = NULL, status = 'setup', finished_at = NULL, updated_at = NOW() WHERE id = ?",
+      [id]
+    );
 
-    await recalculateMatchScore(game.match_id);
+    await recalculateMatchSeriesState(game.match_id, connection);
+    await connection.commit();
 
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
+      io.emit("standings:changed");
     }
 
     res.json({ id: Number(id), winner_team_id: null, status: "setup" });
   } catch (error) {
+    await connection.rollback();
     console.error("Failed to reset game result", error);
     res.status(500).json({ message: "Failed to reset game result" });
+  } finally {
+    connection.release();
   }
 });
 
@@ -304,11 +388,12 @@ router.delete("/:id", async (req, res) => {
     }
 
     await pool.query("DELETE FROM games WHERE id = ?", [id]);
-    await recalculateMatchScore(game.match_id);
+    await recalculateMatchSeriesState(game.match_id);
 
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
+      io.emit("standings:changed");
     }
 
     res.json({ id: Number(id), deleted: true });

@@ -4,11 +4,14 @@ const navItems = [
   { to: "/config", label: "Dashboard", end: true },
   { to: "/config/teams", label: "Teams" },
   { to: "/config/matches", label: "Matches" },
+  { to: "/config/schedule", label: "Schedule" },
   { to: "/config/draft", label: "Draft" },
   { to: "/config/heroes", label: "Heroes" },
   { to: "/config/maps", label: "Maps" },
   { to: "/config/casters", label: "Casters" },
+  { to: "/config/overlay-controls", label: "Overlay Controls" },
   { to: "/config/overlays", label: "Overlays" },
+  { to: "/config/standings", label: "Standings" },
 ];
 
 function ControllerTopNav() {

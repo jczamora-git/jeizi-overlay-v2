@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { getCurrentOverlayData } from "../../services/api";
+import { useEffect, useMemo, useState } from "react";
+import { getCurrentOverlayData, getMaps } from "../../services/api";
 import WinIndicators from "../../components/overlay/WinIndicators";
 import banningBg from "../../game_ui/banning.png";
 import { resolveAssetUrl } from "../../utils/assetUrl";
@@ -22,11 +22,26 @@ const formatBestOf = (mode) => {
 
 const formatMatchTitle = (title) => {
   if (!title) return "";
-  const normalized = String(title).toUpperCase();
-  if (normalized === "ELIMINATION") {
-    return "ELIMINATION ROUND";
+  const normalized = String(title)
+    .toUpperCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/[()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (normalized === "ELIMINATION" || normalized === "ELIMINATION ROUND") {
+    return "ELIMINATION";
   }
-  return normalized;
+
+  const isSemis = normalized.includes("SEMI") || normalized.includes("SEMIFINAL");
+  if (isSemis && normalized.includes("UPPER")) {
+    return "SEMIS-UPPER";
+  }
+  if (isSemis && normalized.includes("LOWER")) {
+    return "SEMIS-LOWER";
+  }
+
+  return String(title).toUpperCase();
 };
 
 const getTeamLogo = (team) =>
@@ -38,13 +53,17 @@ const getTeamLogo = (team) =>
   team?.team_logo ||
   "";
 
+const getMapImagePath = (map) => map?.map_image || map?.image || map?.icon_path || "";
+
 function LegacyDraftOverlay() {
   const [data, setData] = useState({
     match: null,
     blue_team: null,
     red_team: null,
     game: null,
+    map: null,
   });
+  const [maps, setMaps] = useState([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -57,7 +76,7 @@ function LegacyDraftOverlay() {
         }
       } catch (error) {
         if (isMounted) {
-          setData({ match: null, blue_team: null, red_team: null, game: null });
+          setData({ match: null, blue_team: null, red_team: null, game: null, map: null });
         }
       }
     };
@@ -71,15 +90,53 @@ function LegacyDraftOverlay() {
     };
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadMaps = async () => {
+      try {
+        const mapList = await getMaps();
+        if (isMounted) {
+          setMaps(Array.isArray(mapList) ? mapList : []);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setMaps([]);
+        }
+      }
+    };
+
+    loadMaps();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const match = data.match || {};
   const blueTeam = data.blue_team || {};
   const redTeam = data.red_team || {};
   const game = data.game || {};
+  const selectedMap = data.map || data.current_map || game.map || {};
   const seriesTotal = getSeriesLength(match.mode);
   const blueLogo = getTeamLogo(blueTeam);
   const redLogo = getTeamLogo(redTeam);
   const resolvedBlueLogo = blueLogo ? resolveAssetUrl(blueLogo) : "";
   const resolvedRedLogo = redLogo ? resolveAssetUrl(redLogo) : "";
+  const selectedMapImagePath = getMapImagePath(selectedMap);
+  const resolvedSelectedMapImage = selectedMapImagePath ? resolveAssetUrl(selectedMapImagePath) : "";
+  const hasSelectedMap = Boolean(selectedMap?.name && resolvedSelectedMapImage);
+  const mapName = hasSelectedMap
+    ? String(selectedMap.name || "").toUpperCase()
+    : "RANDOM MAP DRAW";
+  const rollingMaps = useMemo(
+    () =>
+      maps.filter((mapItem) => {
+        const imagePath = getMapImagePath(mapItem);
+        return Boolean(imagePath);
+      }),
+    [maps]
+  );
 
   return (
     <div className="overlay-stage legacy-draft-overlay">
@@ -116,6 +173,50 @@ function LegacyDraftOverlay() {
         </div>
         <div className="legacy-draft-match-mode">{formatBestOf(match.mode)}</div>
         <div className="legacy-draft-game-no">{`GAME ${game.game_no || "-"}`}</div>
+        <div className="legacy-draft-map-name">{mapName}</div>
+        {hasSelectedMap ? (
+          <img
+            className="legacy-draft-map-image"
+            src={resolvedSelectedMapImage}
+            alt={selectedMap.name || "Map"}
+            draggable="false"
+          />
+        ) : (
+          <div className="legacy-draft-map-image-slot" aria-label="Random map draw">
+            {rollingMaps.length ? (
+              <div className="legacy-draft-map-slot-reel">
+                {rollingMaps.map((mapItem) => {
+                  const imagePath = getMapImagePath(mapItem);
+                  const resolvedImage = imagePath ? resolveAssetUrl(imagePath) : "";
+
+                  return resolvedImage ? (
+                    <img
+                      key={mapItem.id}
+                      className="legacy-draft-map-slot-image"
+                      src={resolvedImage}
+                      alt={mapItem.name || "Map"}
+                      draggable="false"
+                    />
+                  ) : null;
+                })}
+                {rollingMaps.map((mapItem) => {
+                  const imagePath = getMapImagePath(mapItem);
+                  const resolvedImage = imagePath ? resolveAssetUrl(imagePath) : "";
+
+                  return resolvedImage ? (
+                    <img
+                      key={`repeat-${mapItem.id}`}
+                      className="legacy-draft-map-slot-image"
+                      src={resolvedImage}
+                      alt=""
+                      draggable="false"
+                    />
+                  ) : null;
+                })}
+              </div>
+            ) : null}
+          </div>
+        )}
         <WinIndicators
           className="legacy-draft-blue-indicators"
           total={seriesTotal}

@@ -70,13 +70,98 @@ router.put("/:id", uploadTeamLogo.single("logo"), async (req, res) => {
 });
 
 router.delete("/:id", async (req, res) => {
+  const teamId = Number(req.params.id);
+  if (!teamId) {
+    return res.status(400).json({ message: "Invalid team id" });
+  }
+
+  const connection = await pool.getConnection();
   try {
-    const { id } = req.params;
-    await pool.query("DELETE FROM teams WHERE id = ?", [id]);
-    res.status(204).send();
+    await connection.beginTransaction();
+
+    const [teamRows] = await connection.query(
+      "SELECT id, name FROM teams WHERE id = ? LIMIT 1",
+      [teamId]
+    );
+    const team = teamRows[0];
+
+    if (!team) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Team not found" });
+    }
+
+    const [matchRows] = await connection.query(
+      "SELECT id FROM matches WHERE blue_team_id = ? OR red_team_id = ?",
+      [teamId, teamId]
+    );
+    const matchIds = matchRows.map((row) => Number(row.id)).filter(Boolean);
+
+    if (matchIds.length) {
+      const matchPlaceholders = matchIds.map(() => "?").join(",");
+
+      await connection.query(
+        `DELETE FROM draft_actions
+         WHERE game_id IN (
+           SELECT id FROM games WHERE match_id IN (${matchPlaceholders})
+         )`,
+        matchIds
+      );
+      await connection.query(
+        `DELETE FROM games WHERE match_id IN (${matchPlaceholders})`,
+        matchIds
+      );
+      await connection.query(
+        `DELETE FROM matches WHERE id IN (${matchPlaceholders})`,
+        matchIds
+      );
+    }
+
+    const [playerTableRows] = await connection.query(
+      `SELECT 1
+       FROM information_schema.tables
+       WHERE table_schema = DATABASE()
+         AND table_name = 'players'
+       LIMIT 1`
+    );
+
+    if (playerTableRows.length) {
+      const [playerTeamColumnRows] = await connection.query(
+        `SELECT 1
+         FROM information_schema.columns
+         WHERE table_schema = DATABASE()
+           AND table_name = 'players'
+           AND column_name = 'team_id'
+         LIMIT 1`
+      );
+
+      if (playerTeamColumnRows.length) {
+        await connection.query("DELETE FROM players WHERE team_id = ?", [teamId]);
+      }
+    }
+
+    await connection.query("DELETE FROM teams WHERE id = ?", [teamId]);
+    await connection.commit();
+
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("teams:changed");
+      io.emit("matches:changed");
+      io.emit("standings:changed");
+    }
+
+    res.json({
+      success: true,
+      message: "Team and related records deleted successfully",
+      deleted_match_count: matchIds.length,
+      deleted_team_id: teamId,
+      deleted_team_name: team.name,
+    });
   } catch (error) {
+    await connection.rollback();
     console.error("Failed to delete team", error);
     res.status(500).json({ message: "Failed to delete team" });
+  } finally {
+    connection.release();
   }
 });
 
