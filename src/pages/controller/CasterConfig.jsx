@@ -10,6 +10,7 @@ function CasterConfig() {
   const [casters, setCasters] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [isCasterModalOpen, setIsCasterModalOpen] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState("");
   const [brokenPhotos, setBrokenPhotos] = useState({});
@@ -52,6 +53,27 @@ function CasterConfig() {
     setEditingId(null);
     setPhotoFile(null);
     setPhotoPreview("");
+  };
+
+  const openAddCasterModal = () => {
+    resetForm();
+    setIsCasterModalOpen(true);
+  };
+
+  const openEditCasterModal = (caster) => {
+    setForm({
+      name: caster.name || "",
+      photo: caster.photo || "",
+    });
+    setEditingId(caster.id);
+    setPhotoFile(null);
+    setPhotoPreview("");
+    setIsCasterModalOpen(true);
+  };
+
+  const closeCasterModal = () => {
+    setIsCasterModalOpen(false);
+    resetForm();
   };
 
   const closeConfirm = () => {
@@ -100,9 +122,6 @@ function CasterConfig() {
 
     const payload = new FormData();
     payload.append("name", form.name);
-    if (form.photo) {
-      payload.append("photo", form.photo);
-    }
     if (photoFile) {
       payload.append("photo", photoFile);
     }
@@ -117,18 +136,13 @@ function CasterConfig() {
       onConfirm: async () => {
         await saveCaster(payload);
         closeConfirm();
+        setIsCasterModalOpen(false);
       },
     });
   };
 
   const handleEdit = (caster) => {
-    setForm({
-      name: caster.name || "",
-      photo: caster.photo || "",
-    });
-    setEditingId(caster.id);
-    setPhotoFile(null);
-    setPhotoPreview("");
+    openEditCasterModal(caster);
   };
 
   const handleDelete = (caster) => {
@@ -162,90 +176,17 @@ function CasterConfig() {
 
   return (
     <div className="controller-page">
-      <h1>Casters</h1>
-
-      <form className="panel form-grid" onSubmit={handleSubmit}>
-        <label>
-          Name
-          <input
-            value={form.name}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
-            required
-          />
-        </label>
-        <label>
-          Caster Photo Upload
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
-            style={{ display: "none" }}
-            onChange={handlePhotoChange}
-          />
-          <div
-            className="custom-upload"
-            role="button"
-            tabIndex={0}
-            onClick={handlePhotoPick}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                handlePhotoPick();
-              }
-            }}
-          >
-            {previewUrl ? (
-              <div className="custom-upload-preview">
-                <img className="upload-thumb" src={previewUrl} alt="Caster preview" />
-                <div className="upload-file-name">
-                  {photoFile ? photoFile.name : "Using saved photo"}
-                </div>
-              </div>
-            ) : (
-              <div className="custom-upload-placeholder">Choose Caster Photo</div>
-            )}
-            <div className="custom-upload-actions">
-              <button
-                type="button"
-                className="btn-upload"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handlePhotoPick();
-                }}
-              >
-                {previewUrl ? "Change" : "Choose Caster Photo"}
-              </button>
-              {photoFile && (
-                <button type="button" className="btn-remove" onClick={handleRemovePhoto}>
-                  Remove
-                </button>
-              )}
-            </div>
-          </div>
-        </label>
-        <label>
-          Manual Photo Path
-          <input
-            value={form.photo}
-            onChange={(event) => setForm({ ...form, photo: event.target.value })}
-            placeholder="/uploads/casters/caster.png"
-          />
-        </label>
-        <div className="form-actions">
-          <button type="submit">{editingId ? "Save" : "Add Caster"}</button>
-          {editingId && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                resetForm();
-              }}
-            >
-              Cancel
-            </button>
-          )}
+      <div className="page-header match-page-header">
+        <div className="page-title-group">
+          <h1>Casters</h1>
+          <div className="page-subtitle">Manage caster profiles and photos.</div>
         </div>
-      </form>
+        <div className="toolbar match-toolbar">
+          <button type="button" className="button-primary" onClick={openAddCasterModal}>
+            + Add Caster
+          </button>
+        </div>
+      </div>
 
       <section className="panel">
         <h2>Caster List</h2>
@@ -298,6 +239,97 @@ function CasterConfig() {
           </tbody>
         </table>
       </section>
+
+      {isCasterModalOpen
+        ? createPortal(
+            <div className="modal-backdrop" role="dialog" aria-modal="true">
+              <form className="modal-panel" onSubmit={handleSubmit}>
+                <div className="modal-header">
+                  <h3>{editingId ? "Edit Caster" : "Add Caster"}</h3>
+                </div>
+                <div className="modal-body">
+                  <section className="modal-section">
+                    <div className="modal-section-title">Caster Details</div>
+                    <div className="form-grid modal-form-grid">
+                      <label className="form-group">
+                        Caster Name
+                        <input
+                          value={form.name}
+                          onChange={(event) => setForm({ ...form, name: event.target.value })}
+                          required
+                        />
+                      </label>
+                    </div>
+                  </section>
+                  <section className="modal-section">
+                    <div className="modal-section-title">Caster Image</div>
+                    <div className="form-grid modal-form-grid">
+                      <label className="form-group">
+                        Caster Photo Upload
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+                          style={{ display: "none" }}
+                          onChange={handlePhotoChange}
+                        />
+                        <div
+                          className="custom-upload"
+                          role="button"
+                          tabIndex={0}
+                          onClick={handlePhotoPick}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handlePhotoPick();
+                            }
+                          }}
+                        >
+                          {previewUrl ? (
+                            <div className="custom-upload-preview">
+                              <img className="upload-thumb" src={previewUrl} alt="Caster preview" />
+                              <div className="upload-file-name">
+                                {photoFile ? photoFile.name : "Using saved photo"}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="custom-upload-placeholder">Choose Caster Photo</div>
+                          )}
+                          <div className="custom-upload-actions">
+                            <button
+                              type="button"
+                              className="btn-upload"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handlePhotoPick();
+                              }}
+                            >
+                              {previewUrl ? "Change" : "Choose Caster Photo"}
+                            </button>
+                            {photoFile && (
+                              <button type="button" className="btn-remove" onClick={handleRemovePhoto}>
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+                  </section>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="button-ghost" onClick={closeCasterModal}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="button-primary">
+                    {editingId ? "Update Caster" : "Add Caster"}
+                  </button>
+                </div>
+              </form>
+            </div>,
+            document.body
+          )
+        : null}
 
       {confirmState.open
         ? createPortal(

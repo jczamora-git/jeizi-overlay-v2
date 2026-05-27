@@ -16,7 +16,7 @@ router.get("/", async (req, res) => {
 
 router.post("/", uploadHeroImage.single("image"), async (req, res) => {
   try {
-    const { name, role, image_path } = req.body;
+    const { name, role, lane, image_path } = req.body;
     if (!name) {
       return res.status(400).json({ message: "Hero name is required" });
     }
@@ -24,14 +24,15 @@ router.post("/", uploadHeroImage.single("image"), async (req, res) => {
     const imagePath = req.file ? `/uploads/heroes/${req.file.filename}` : image_path || null;
 
     const [result] = await pool.query(
-      "INSERT INTO heroes (name, role, image_path) VALUES (?,?,?)",
-      [name, role || null, imagePath]
+      "INSERT INTO heroes (name, role, lane, image_path) VALUES (?,?,?,?)",
+      [name, role || null, lane || null, imagePath]
     );
 
     res.status(201).json({
       id: result.insertId,
       name,
       role: role || null,
+      lane: lane || null,
       image_path: imagePath,
     });
   } catch (error) {
@@ -43,7 +44,7 @@ router.post("/", uploadHeroImage.single("image"), async (req, res) => {
 router.put("/:id", uploadHeroImage.single("image"), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, role, image_path } = req.body;
+    const { name, role, lane, image_path } = req.body;
 
     const [existingRows] = await pool.query("SELECT image_path FROM heroes WHERE id = ?", [id]);
     if (!existingRows.length) {
@@ -59,14 +60,18 @@ router.put("/:id", uploadHeroImage.single("image"), async (req, res) => {
       nextImagePath = image_path || null;
     }
 
-    await pool.query("UPDATE heroes SET name = ?, role = ?, image_path = ? WHERE id = ?", [
-      name,
-      role || null,
-      nextImagePath,
-      id,
-    ]);
+    await pool.query(
+      "UPDATE heroes SET name = ?, role = ?, lane = ?, image_path = ? WHERE id = ?",
+      [name, role || null, lane || null, nextImagePath, id]
+    );
 
-    res.json({ id: Number(id), name, role: role || null, image_path: nextImagePath });
+    res.json({
+      id: Number(id),
+      name,
+      role: role || null,
+      lane: lane || null,
+      image_path: nextImagePath,
+    });
   } catch (error) {
     console.error("Failed to update hero", error);
     res.status(500).json({ message: "Failed to update hero" });

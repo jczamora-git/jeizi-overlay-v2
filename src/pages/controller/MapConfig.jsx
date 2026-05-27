@@ -10,6 +10,7 @@ function MapConfig() {
   const [maps, setMaps] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [isMapModalOpen, setIsMapModalOpen] = useState(false);
   const [iconFile, setIconFile] = useState(null);
   const [iconPreview, setIconPreview] = useState("");
   const [mapImageFile, setMapImageFile] = useState(null);
@@ -74,6 +75,30 @@ function MapConfig() {
     setMapImagePreview("");
   };
 
+  const openAddMapModal = () => {
+    resetForm();
+    setIsMapModalOpen(true);
+  };
+
+  const openEditMapModal = (map) => {
+    setForm({
+      name: map.name || "",
+      icon_path: map.icon_path || "",
+      map_image: map.map_image || "",
+    });
+    setEditingId(map.id);
+    setIconFile(null);
+    setIconPreview("");
+    setMapImageFile(null);
+    setMapImagePreview("");
+    setIsMapModalOpen(true);
+  };
+
+  const closeMapModal = () => {
+    setIsMapModalOpen(false);
+    resetForm();
+  };
+
   const closeConfirm = () => {
     setConfirmState((prev) => ({
       ...prev,
@@ -121,10 +146,6 @@ function MapConfig() {
     const payload = new FormData();
     payload.append("name", form.name);
 
-    if (form.icon_path) {
-      payload.append("icon_path", form.icon_path);
-    }
-
     if (iconFile) {
       payload.append("icon", iconFile);
     }
@@ -141,21 +162,13 @@ function MapConfig() {
       onConfirm: async () => {
         await saveMap(payload);
         closeConfirm();
+        setIsMapModalOpen(false);
       },
     });
   };
 
   const handleEdit = (map) => {
-    setForm({
-      name: map.name || "",
-      icon_path: map.icon_path || "",
-      map_image: map.map_image || "",
-    });
-    setEditingId(map.id);
-    setIconFile(null);
-    setIconPreview("");
-    setMapImageFile(null);
-    setMapImagePreview("");
+    openEditMapModal(map);
   };
 
   const handleIconPick = () => {
@@ -203,142 +216,17 @@ function MapConfig() {
 
   return (
     <div className="controller-page">
-      <h1>Maps</h1>
-
-      <form className="panel form-grid" onSubmit={handleSubmit}>
-        <label>
-          Name
-          <input
-            value={form.name}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
-            required
-          />
-        </label>
-        <label>
-          Map Icon Upload
-          <input
-            ref={iconInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
-            style={{ display: "none" }}
-            onChange={handleIconChange}
-          />
-          <div
-            className="custom-upload"
-            role="button"
-            tabIndex={0}
-            onClick={handleIconPick}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                handleIconPick();
-              }
-            }}
-          >
-            {iconPreviewUrl ? (
-              <div className="custom-upload-preview">
-                <img className="upload-thumb" src={iconPreviewUrl} alt="Map icon preview" />
-                <div className="upload-file-name">
-                  {iconFile ? iconFile.name : "Using saved icon"}
-                </div>
-              </div>
-            ) : (
-              <div className="custom-upload-placeholder">Choose Map Icon</div>
-            )}
-            <div className="custom-upload-actions">
-              <button
-                type="button"
-                className="btn-upload"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleIconPick();
-                }}
-              >
-                {iconPreviewUrl ? "Change" : "Choose Map Icon"}
-              </button>
-              {iconFile && (
-                <button type="button" className="btn-remove" onClick={handleRemoveIcon}>
-                  Remove
-                </button>
-              )}
-            </div>
-          </div>
-        </label>
-        <label>
-          Manual Icon Path
-          <input
-            value={form.icon_path}
-            onChange={(event) => setForm({ ...form, icon_path: event.target.value })}
-            placeholder="/uploads/maps/map.png"
-          />
-        </label>
-        <label>
-          Map Image Upload
-          <input
-            ref={mapImageInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
-            style={{ display: "none" }}
-            onChange={handleMapImageChange}
-          />
-          <div
-            className="custom-upload"
-            role="button"
-            tabIndex={0}
-            onClick={handleMapImagePick}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                handleMapImagePick();
-              }
-            }}
-          >
-            {mapImagePreviewUrl ? (
-              <div className="custom-upload-preview">
-                <img
-                  className="upload-thumb upload-thumb-wide"
-                  src={mapImagePreviewUrl}
-                  alt="Map image preview"
-                />
-                <div className="upload-file-name">
-                  {mapImageFile ? mapImageFile.name : "Using saved map image"}
-                </div>
-              </div>
-            ) : (
-              <div className="custom-upload-placeholder">Choose Map Image</div>
-            )}
-            <div className="custom-upload-actions">
-              <button
-                type="button"
-                className="btn-upload"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleMapImagePick();
-                }}
-              >
-                {mapImagePreviewUrl ? "Change" : "Choose Map Image"}
-              </button>
-              {mapImageFile && (
-                <button type="button" className="btn-remove" onClick={handleRemoveMapImage}>
-                  Remove
-                </button>
-              )}
-            </div>
-          </div>
-        </label>
-        <div className="form-actions">
-          <button type="submit">{editingId ? "Save" : "Add Map"}</button>
-          {editingId && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={resetForm}
-            >
-              Cancel
-            </button>
-          )}
+      <div className="page-header match-page-header">
+        <div className="page-title-group">
+          <h1>Maps</h1>
+          <div className="page-subtitle">Manage map details, icons, and images.</div>
         </div>
-      </form>
+        <div className="toolbar match-toolbar">
+          <button type="button" className="button-primary" onClick={openAddMapModal}>
+            + Add Map
+          </button>
+        </div>
+      </div>
 
       <section className="panel">
         <h2>Map List</h2>
@@ -416,6 +304,151 @@ function MapConfig() {
           </tbody>
         </table>
       </section>
+
+      {isMapModalOpen
+        ? createPortal(
+            <div className="modal-backdrop" role="dialog" aria-modal="true">
+              <form className="modal-panel" onSubmit={handleSubmit}>
+                <div className="modal-header">
+                  <h3>{editingId ? "Edit Map" : "Add Map"}</h3>
+                </div>
+                <div className="modal-body">
+                  <section className="modal-section">
+                    <div className="modal-section-title">Map Details</div>
+                    <div className="form-grid modal-form-grid">
+                      <label className="form-group">
+                        Map Name
+                        <input
+                          value={form.name}
+                          onChange={(event) => setForm({ ...form, name: event.target.value })}
+                          required
+                        />
+                      </label>
+                    </div>
+                  </section>
+                  <section className="modal-section">
+                    <div className="modal-section-title">Map Media</div>
+                    <div className="form-grid modal-form-grid">
+                      <label className="form-group">
+                        Map Icon Upload
+                        <input
+                          ref={iconInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+                          style={{ display: "none" }}
+                          onChange={handleIconChange}
+                        />
+                        <div
+                          className="custom-upload"
+                          role="button"
+                          tabIndex={0}
+                          onClick={handleIconPick}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handleIconPick();
+                            }
+                          }}
+                        >
+                          {iconPreviewUrl ? (
+                            <div className="custom-upload-preview">
+                              <img className="upload-thumb" src={iconPreviewUrl} alt="Map icon preview" />
+                              <div className="upload-file-name">
+                                {iconFile ? iconFile.name : "Using saved icon"}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="custom-upload-placeholder">Choose Map Icon</div>
+                          )}
+                          <div className="custom-upload-actions">
+                            <button
+                              type="button"
+                              className="btn-upload"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleIconPick();
+                              }}
+                            >
+                              {iconPreviewUrl ? "Change" : "Choose Map Icon"}
+                            </button>
+                            {iconFile && (
+                              <button type="button" className="btn-remove" onClick={handleRemoveIcon}>
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                      <label className="form-group">
+                        Map Image Upload
+                        <input
+                          ref={mapImageInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+                          style={{ display: "none" }}
+                          onChange={handleMapImageChange}
+                        />
+                        <div
+                          className="custom-upload"
+                          role="button"
+                          tabIndex={0}
+                          onClick={handleMapImagePick}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handleMapImagePick();
+                            }
+                          }}
+                        >
+                          {mapImagePreviewUrl ? (
+                            <div className="custom-upload-preview">
+                              <img
+                                className="upload-thumb upload-thumb-wide"
+                                src={mapImagePreviewUrl}
+                                alt="Map image preview"
+                              />
+                              <div className="upload-file-name">
+                                {mapImageFile ? mapImageFile.name : "Using saved map image"}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="custom-upload-placeholder">Choose Map Image</div>
+                          )}
+                          <div className="custom-upload-actions">
+                            <button
+                              type="button"
+                              className="btn-upload"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleMapImagePick();
+                              }}
+                            >
+                              {mapImagePreviewUrl ? "Change" : "Choose Map Image"}
+                            </button>
+                            {mapImageFile && (
+                              <button type="button" className="btn-remove" onClick={handleRemoveMapImage}>
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+                  </section>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="button-ghost" onClick={closeMapModal}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="button-primary">
+                    {editingId ? "Update Map" : "Add Map"}
+                  </button>
+                </div>
+              </form>
+            </div>,
+            document.body
+          )
+        : null}
 
       {confirmState.open
         ? createPortal(

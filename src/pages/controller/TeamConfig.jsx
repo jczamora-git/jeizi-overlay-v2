@@ -11,6 +11,7 @@ function TeamConfig() {
   const [teams, setTeams] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState("");
   const [brokenLogos, setBrokenLogos] = useState({});
@@ -60,6 +61,28 @@ function TeamConfig() {
     setEditingId(null);
     setLogoFile(null);
     setLogoPreview("");
+  };
+
+  const openAddTeamModal = () => {
+    resetForm();
+    setIsTeamModalOpen(true);
+  };
+
+  const openEditTeamModal = (team) => {
+    setForm({
+      name: team.name || "",
+      shortname: team.shortname || "",
+      logoPath: team.logo || "",
+    });
+    setEditingId(team.id);
+    setLogoFile(null);
+    setLogoPreview("");
+    setIsTeamModalOpen(true);
+  };
+
+  const closeTeamModal = () => {
+    setIsTeamModalOpen(false);
+    resetForm();
   };
 
   const closeConfirm = () => {
@@ -115,33 +138,10 @@ function TeamConfig() {
     }
     if (logoFile) {
       payload.append("logo", logoFile);
-    } else if (form.logoPath) {
-      payload.append("logo", form.logoPath);
     }
 
-    const isEditing = Boolean(editingId);
-    openConfirm({
-      title: isEditing ? "Save Changes" : "Create Team",
-      message: isEditing
-        ? "Apply these changes?"
-        : "Create this team with the entered details?",
-      confirmText: isEditing ? "Save Changes" : "Create",
-      onConfirm: async () => {
-        await saveTeam(payload);
-        closeConfirm();
-      },
-    });
-  };
-
-  const handleEdit = (team) => {
-    setForm({
-      name: team.name || "",
-      shortname: team.shortname || "",
-      logoPath: team.logo || "",
-    });
-    setEditingId(team.id);
-    setLogoFile(null);
-    setLogoPreview("");
+    await saveTeam(payload);
+    setIsTeamModalOpen(false);
   };
 
   const handleLogoPick = () => {
@@ -189,93 +189,17 @@ function TeamConfig() {
         <Toast message={toast.message} type={toast.type} onClose={closeToast} />
       </div>
 
-      <h1>Teams</h1>
-
-      <form className="panel form-grid" onSubmit={handleSubmit}>
-        <label>
-          Name
-          <input
-            value={form.name}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
-            required
-          />
-        </label>
-        <label>
-          Shortname
-          <input
-            value={form.shortname}
-            onChange={(event) => setForm({ ...form, shortname: event.target.value })}
-          />
-        </label>
-        <label>
-          Logo Upload
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
-            style={{ display: "none" }}
-            onChange={handleLogoChange}
-          />
-          <div
-            className="custom-upload"
-            role="button"
-            tabIndex={0}
-            onClick={handleLogoPick}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                handleLogoPick();
-              }
-            }}
-          >
-            {previewUrl ? (
-              <div className="custom-upload-preview">
-                <img className="upload-thumb" src={previewUrl} alt="Logo preview" />
-                <div className="upload-file-name">
-                  {logoFile ? logoFile.name : "Using saved logo"}
-                </div>
-              </div>
-            ) : (
-              <div className="custom-upload-placeholder">Choose Logo</div>
-            )}
-            <div className="custom-upload-actions">
-              <button type="button" className="btn-upload" onClick={(event) => {
-                event.stopPropagation();
-                handleLogoPick();
-              }}>
-                {previewUrl ? "Change" : "Choose Logo"}
-              </button>
-              {logoFile && (
-                <button type="button" className="btn-remove" onClick={handleRemoveLogo}>
-                  Remove
-                </button>
-              )}
-            </div>
-          </div>
-        </label>
-        <label>
-          Manual Logo Path
-          <input
-            value={form.logoPath}
-            onChange={(event) => setForm({ ...form, logoPath: event.target.value })}
-            placeholder="/uploads/teams/logo.png"
-          />
-        </label>
-        <div className="form-actions">
-          <button type="submit">{editingId ? "Save" : "Add Team"}</button>
-          {editingId && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                resetForm();
-              }}
-            >
-              Cancel
-            </button>
-          )}
+      <div className="page-header match-page-header">
+        <div className="page-title-group">
+          <h1>Teams</h1>
+          <div className="page-subtitle">Manage team profiles, logos, and shortnames.</div>
         </div>
-      </form>
+        <div className="toolbar match-toolbar">
+          <button type="button" className="button-primary" onClick={openAddTeamModal}>
+            + Add Team
+          </button>
+        </div>
+      </div>
 
       <section className="panel">
         <h2>Team List</h2>
@@ -320,7 +244,7 @@ function TeamConfig() {
                   )}
                 </td>
                 <td>
-                  <button onClick={() => handleEdit(team)}>Edit</button>
+                  <button onClick={() => openEditTeamModal(team)}>Edit</button>
                   <button className="secondary" onClick={() => handleDelete(team)}>
                     Delete
                   </button>
@@ -330,6 +254,104 @@ function TeamConfig() {
           </tbody>
         </table>
       </section>
+
+      {isTeamModalOpen
+        ? createPortal(
+            <div className="modal-backdrop" role="dialog" aria-modal="true">
+              <form className="modal-panel" onSubmit={handleSubmit}>
+                <div className="modal-header">
+                  <h3>{editingId ? "Edit Team" : "Add Team"}</h3>
+                </div>
+                <div className="modal-body">
+                  <section className="modal-section">
+                    <div className="modal-section-title">Team Details</div>
+                    <div className="form-grid modal-form-grid">
+                      <label className="form-group">
+                        Team Name
+                        <input
+                          value={form.name}
+                          onChange={(event) => setForm({ ...form, name: event.target.value })}
+                          required
+                        />
+                      </label>
+                      <label className="form-group">
+                        Shortname
+                        <input
+                          value={form.shortname}
+                          onChange={(event) => setForm({ ...form, shortname: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                  </section>
+                  <section className="modal-section">
+                    <div className="modal-section-title">Logo</div>
+                    <div className="form-grid modal-form-grid">
+                      <label className="form-group">
+                        Logo Upload
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+                          style={{ display: "none" }}
+                          onChange={handleLogoChange}
+                        />
+                        <div
+                          className="custom-upload"
+                          role="button"
+                          tabIndex={0}
+                          onClick={handleLogoPick}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handleLogoPick();
+                            }
+                          }}
+                        >
+                          {previewUrl ? (
+                            <div className="custom-upload-preview">
+                              <img className="upload-thumb" src={previewUrl} alt="Logo preview" />
+                              <div className="upload-file-name">
+                                {logoFile ? logoFile.name : "Using saved logo"}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="custom-upload-placeholder">Choose Logo</div>
+                          )}
+                          <div className="custom-upload-actions">
+                            <button
+                              type="button"
+                              className="btn-upload"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleLogoPick();
+                              }}
+                            >
+                              {previewUrl ? "Change" : "Choose Logo"}
+                            </button>
+                            {logoFile && (
+                              <button type="button" className="btn-remove" onClick={handleRemoveLogo}>
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+                  </section>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="button-ghost" onClick={closeTeamModal}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="button-primary">
+                    {editingId ? "Update Team" : "Add Team"}
+                  </button>
+                </div>
+              </form>
+            </div>,
+            document.body
+          )
+        : null}
 
       {confirmState.open
         ? createPortal(

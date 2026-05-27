@@ -148,6 +148,25 @@ export const createDraftAction = (payload) =>
 export const updateDraftAction = (id, payload) =>
   request(`/draft/${id}`, { method: "PUT", body: JSON.stringify(payload) });
 export const deleteDraftAction = (id) => request(`/draft/${id}`, { method: "DELETE" });
+export const getDraftSession = (matchId, gameNumber) =>
+  request(`/draft/session?match_id=${matchId}&game_number=${gameNumber}`);
+export const createDraftSession = (payload) =>
+  request("/draft/session", { method: "POST", body: JSON.stringify(payload) });
+export const updateDraftSession = (id, payload) =>
+  request(`/draft/session/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export const getDraftSlots = (sessionId) => request(`/draft/sessions/${sessionId}/slots`);
+export const upsertDraftSlot = (sessionId, payload) =>
+  request(`/draft/sessions/${sessionId}/slots`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+export const clearDraftSlots = (sessionId) =>
+  request(`/draft/sessions/${sessionId}/slots`, { method: "DELETE" });
+export const saveDraftSlots = (sessionId, payload) =>
+  request(`/draft/sessions/${sessionId}/save-slots`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 
 export const getCurrentOverlayData = () => request("/current-overlay-data");
 export const getSchedule = () => request("/schedule");

@@ -23,6 +23,7 @@ import MapChangeOverlay from "./pages/overlays/MapChangeOverlay.jsx";
 import OverlayPatternPage from "./pages/overlays/OverlayPatternPage.jsx";
 import ScheduleOverlay from "./pages/overlays/ScheduleOverlay.jsx";
 import VictoryOverlay from "./pages/overlays/VictoryOverlay.jsx";
+import BracketPreviewPage from "./pages/public/BracketPreviewPage.jsx";
 import "./styles/controller.css";
 
 function AppRoutes() {
@@ -68,6 +69,7 @@ function AppRoutes() {
       <Route path="/overlay/victory" element={<VictoryOverlay />} />
       <Route path="/overlays/pattern" element={<OverlayPatternPage />} />
       <Route path="/overlays/schedule" element={<ScheduleOverlay />} />
+      <Route path="/bracket-preview" element={<BracketPreviewPage />} />
     </Routes>
   );
 }

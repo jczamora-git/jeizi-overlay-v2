@@ -9,6 +9,7 @@ router.post("/preview", async (req, res) => {
   try {
     const participants = Array.isArray(req.body?.participants) ? req.body.participants : null;
     const roundModes = req.body?.roundModes || {};
+    const options = req.body?.options || {};
 
     if (!participants) {
       return res.status(400).json({ message: "participants must be an array" });
@@ -53,6 +54,10 @@ router.post("/preview", async (req, res) => {
 
     const bracket = generateSingleEliminationBracket(normalizedParticipants, {
       roundModes,
+      bracketType: options.bracketType,
+      seedingMode: options.seedingMode,
+      includeThirdPlace: options.includeThirdPlace,
+      thirdPlaceMode: roundModes["Battle for Third"],
     });
 
     res.json({
