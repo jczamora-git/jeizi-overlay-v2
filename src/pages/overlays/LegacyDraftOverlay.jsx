@@ -8,9 +8,9 @@ import "../../styles/overlays/legacy-draft-overlay.css";
 
 const getSeriesLength = (mode) => {
   const normalized = String(mode || "").toUpperCase();
-  if (normalized === "BO3") return 3;
-  if (normalized === "BO5") return 5;
-  if (normalized === "BO7") return 7;
+  if (normalized === "BO3") return 2;
+  if (normalized === "BO5") return 3;
+  if (normalized === "BO7") return 4;
   return 1;
 };
 
@@ -114,11 +114,21 @@ function LegacyDraftOverlay() {
   }, []);
 
   const match = data.match || {};
-  const blueTeam = data.blue_team || {};
-  const redTeam = data.red_team || {};
+  const blueTeam = data.overlay_blue_team || data.blue_team || {};
+  const redTeam = data.overlay_red_team || data.red_team || {};
   const game = data.game || {};
   const selectedMap = data.map || data.current_map || game.map || {};
   const seriesTotal = getSeriesLength(match.mode);
+  const overlayBlueTeamId = Number(data.overlay_blue_team_id || blueTeam.id || match.blue_team_id || 0);
+  const overlayRedTeamId = Number(data.overlay_red_team_id || redTeam.id || match.red_team_id || 0);
+  const blueScore =
+    overlayBlueTeamId && overlayBlueTeamId === Number(match.red_team_id)
+      ? match.red_score ?? 0
+      : match.blue_score ?? 0;
+  const redScore =
+    overlayRedTeamId && overlayRedTeamId === Number(match.blue_team_id)
+      ? match.blue_score ?? 0
+      : match.red_score ?? 0;
   const blueLogo = getTeamLogo(blueTeam);
   const redLogo = getTeamLogo(redTeam);
   const resolvedBlueLogo = blueLogo ? resolveAssetUrl(blueLogo) : "";
@@ -220,7 +230,7 @@ function LegacyDraftOverlay() {
         <WinIndicators
           className="legacy-draft-blue-indicators"
           total={seriesTotal}
-          score={match.blue_score ?? 0}
+          score={blueScore}
           side="blue"
           size={28}
           gap={0}
@@ -228,7 +238,7 @@ function LegacyDraftOverlay() {
         <WinIndicators
           className="legacy-draft-red-indicators"
           total={seriesTotal}
-          score={match.red_score ?? 0}
+          score={redScore}
           side="red"
           size={28}
           gap={0}

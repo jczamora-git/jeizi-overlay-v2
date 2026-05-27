@@ -39,9 +39,19 @@ function DraftOverlay() {
   }, []);
 
   const match = data.match || {};
-  const blueTeam = data.blue_team || {};
-  const redTeam = data.red_team || {};
+  const blueTeam = data.overlay_blue_team || data.blue_team || {};
+  const redTeam = data.overlay_red_team || data.red_team || {};
   const actions = data.draft_actions || [];
+  const overlayBlueTeamId = Number(data.overlay_blue_team_id || blueTeam.id || match.blue_team_id || 0);
+  const overlayRedTeamId = Number(data.overlay_red_team_id || redTeam.id || match.red_team_id || 0);
+  const blueScore =
+    overlayBlueTeamId && overlayBlueTeamId === Number(match.red_team_id)
+      ? match.red_score ?? 0
+      : match.blue_score ?? 0;
+  const redScore =
+    overlayRedTeamId && overlayRedTeamId === Number(match.blue_team_id)
+      ? match.blue_score ?? 0
+      : match.red_score ?? 0;
 
   const blueActions = actions.filter((action) => action.team_side === "BLUE");
   const redActions = actions.filter((action) => action.team_side === "RED");
@@ -52,7 +62,7 @@ function DraftOverlay() {
       <div className="overlay-text draft-blue-name">{blueTeam.name || "Blue"}</div>
       <div className="overlay-text draft-red-name">{redTeam.name || "Red"}</div>
       <div className="overlay-text draft-score">
-        {match.blue_score ?? 0} - {match.red_score ?? 0}
+        {blueScore} - {redScore}
       </div>
 
       {blueTeam.logo && (

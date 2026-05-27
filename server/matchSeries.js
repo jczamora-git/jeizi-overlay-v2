@@ -1,14 +1,7 @@
 const { pool } = require("./db");
 
 function getRequiredWins(mode) {
-  const normalized = String(mode || "").toUpperCase();
-
-  if (normalized === "BO1") return 1;
-  if (normalized === "BO3") return 2;
-  if (normalized === "BO5") return 3;
-  if (normalized === "BO7") return 3;
-
-  return 1;
+  return Math.ceil(getMaxGamesByMode(mode) / 2);
 }
 
 function getMaxGamesByMode(mode) {

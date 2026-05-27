@@ -4,6 +4,7 @@ import ControllerLayout from "./components/common/ControllerLayout.jsx";
 import Dashboard from "./pages/controller/Dashboard.jsx";
 import TeamConfig from "./pages/controller/TeamConfig.jsx";
 import MatchConfig from "./pages/controller/MatchConfig.jsx";
+import BracketGenerator from "./pages/controller/BracketGenerator.jsx";
 import GameConfig from "./pages/controller/GameConfig.jsx";
 import DraftController from "./pages/controller/DraftController.jsx";
 import HeroConfig from "./pages/controller/HeroConfig.jsx";
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route index element={<Dashboard />} />
         <Route path="teams" element={<TeamConfig />} />
         <Route path="matches" element={<MatchConfig />} />
+        <Route path="bracket" element={<BracketGenerator />} />
         <Route path="games" element={<GameConfig />} />
         <Route path="draft" element={<DraftController />} />
         <Route path="heroes" element={<HeroConfig />} />

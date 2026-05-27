@@ -15,6 +15,7 @@ const castersRoutes = require("./routes/casters.routes");
 const overlaySettingsRoutes = require("./routes/overlay-settings.routes");
 const scheduleRoutes = require("./routes/schedule.routes");
 const standingsRoutes = require("./routes/standings.routes");
+const bracketRoutes = require("./routes/bracket.routes");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -42,6 +43,7 @@ app.use("/api/casters", castersRoutes);
 app.use("/api/overlay-settings", overlaySettingsRoutes);
 app.use("/api/schedule", scheduleRoutes);
 app.use("/api/standings", standingsRoutes);
+app.use("/api/bracket", bracketRoutes);
 
 app.get("/api/current-overlay-data", async (req, res) => {
   try {
@@ -86,6 +88,8 @@ app.get("/api/current-overlay-data", async (req, res) => {
 
     let blueTeam = null;
     let redTeam = null;
+    let overlayBlueTeam = null;
+    let overlayRedTeam = null;
     let game = null;
     let latestFinishedGame = null;
     let map = null;
@@ -155,12 +159,20 @@ app.get("/api/current-overlay-data", async (req, res) => {
         );
         casters = casterRows;
       }
+
+      const isEvenGame = Number(game?.game_no || 1) % 2 === 0;
+      overlayBlueTeam = isEvenGame ? redTeam : blueTeam;
+      overlayRedTeam = isEvenGame ? blueTeam : redTeam;
     }
 
     res.json({
       match,
       blue_team: blueTeam,
       red_team: redTeam,
+      overlay_blue_team_id: overlayBlueTeam?.id || null,
+      overlay_red_team_id: overlayRedTeam?.id || null,
+      overlay_blue_team: overlayBlueTeam,
+      overlay_red_team: overlayRedTeam,
       game,
       latest_finished_game: latestFinishedGame,
       map,

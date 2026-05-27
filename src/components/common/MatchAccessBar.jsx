@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { getMatches, getTeams } from "../../services/api";
 import socket from "../../services/socket";
 
 const FINISHED_STATUSES = ["finished", "done", "completed"];
 const LIVE_STATUSES = ["live", "active", "ongoing"];
-const UPCOMING_STATUSES = ["queued", "setup", "pending"];
+const UPCOMING_STATUSES = ["queued", "setup", "pending", "scheduled", "upcoming"];
 
 function normalizeStatus(status) {
   return String(status || "").toLowerCase();
@@ -21,6 +21,18 @@ function isLiveMatch(match) {
 
 function isUpcomingMatch(match) {
   return UPCOMING_STATUSES.includes(normalizeStatus(match?.status));
+}
+
+function getMatchAccessRank(match) {
+  if (isLiveMatch(match)) {
+    return 0;
+  }
+
+  if (isFinishedMatch(match)) {
+    return 2;
+  }
+
+  return 1;
 }
 
 function isSeriesComplete(match) {
@@ -115,6 +127,7 @@ function MatchAccessBar() {
   const [matches, setMatches] = useState([]);
   const [teams, setTeams] = useState([]);
   const trackRef = useRef(null);
+  const location = useLocation();
 
   const loadData = useCallback(async () => {
     try {
@@ -157,21 +170,35 @@ function MatchAccessBar() {
       .slice(0, 3);
   }, [matches]);
 
-  const liveMatches = useMemo(() => {
-    return [...matches].filter(isLiveMatch).sort(sortByMatchOrder);
-  }, [matches]);
+  const prioritizedMatches = useMemo(() => {
+    return [...matches]
+      .filter((match) => !isFinishedMatch(match) && !isSeriesComplete(match))
+      .sort((left, right) => {
+        const rankDiff = getMatchAccessRank(left) - getMatchAccessRank(right);
+        if (rankDiff !== 0) {
+          return rankDiff;
+        }
 
-  const upcomingMatches = useMemo(() => {
-    return [...matches].filter(isUpcomingMatch).sort(sortByMatchOrder);
+        return sortByMatchOrder(left, right);
+      });
   }, [matches]);
 
   const visibleMatches = useMemo(() => {
-    const combined = [...finishedMatches, ...liveMatches, ...upcomingMatches];
+    const combined = prioritizedMatches.length
+      ? [...prioritizedMatches, ...finishedMatches]
+      : finishedMatches;
+
     return combined.filter(
       (match, index, array) =>
         array.findIndex((item) => Number(item.id) === Number(match.id)) === index
     );
-  }, [finishedMatches, liveMatches, upcomingMatches]);
+  }, [finishedMatches, prioritizedMatches]);
+
+  useEffect(() => {
+    if (trackRef.current) {
+      trackRef.current.scrollLeft = 0;
+    }
+  }, [visibleMatches, location.pathname, location.search]);
 
   const scrollByCard = (direction) => {
     if (!trackRef.current) return;
@@ -216,7 +243,7 @@ function MatchAccessBar() {
             return (
               <Link
                 key={match.id}
-                to="/config/matches"
+                to={`/config/matches?matchId=${match.id}&open=games`}
                 className={[
                   "match-strip-card",
                   isLiveMatch(match) ? "is-live" : "",

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "react-router-dom";
 import {
   createGame,
   deleteMatch,
@@ -61,12 +62,126 @@ function getMaxGamesByMode(mode) {
 }
 
 function getRequiredWins(mode) {
-  const normalized = String(mode || "").toUpperCase();
-  if (normalized === "BO1") return 1;
-  if (normalized === "BO3") return 2;
-  if (normalized === "BO5") return 3;
-  if (normalized === "BO7") return 3;
+  return Math.ceil(getMaxGamesByMode(mode) / 2);
+}
+
+function getMatchStatusRank(match) {
+  const normalizedStatus = String(match?.status || "").toLowerCase();
+  if (["live", "active", "ongoing"].includes(normalizedStatus)) {
+    return 0;
+  }
+  if (["finished", "completed", "done"].includes(normalizedStatus)) {
+    return 2;
+  }
   return 1;
+}
+
+function getTimeValue(value) {
+  const time = Date.parse(value || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+function getMatchFinishedTime(match) {
+  return Math.max(getTimeValue(match?.finished_at), getTimeValue(match?.updated_at));
+}
+
+function sortMatchesByStatusAndQueue(left, right) {
+  const leftRank = getMatchStatusRank(left);
+  const rightRank = getMatchStatusRank(right);
+  const statusRankDiff = leftRank - rightRank;
+  if (statusRankDiff !== 0) {
+    return statusRankDiff;
+  }
+
+  if (leftRank === 2) {
+    const finishedTimeDiff = getMatchFinishedTime(right) - getMatchFinishedTime(left);
+    if (finishedTimeDiff !== 0) {
+      return finishedTimeDiff;
+    }
+
+    const matchNoDiff = Number(right.match_no || 0) - Number(left.match_no || 0);
+    if (matchNoDiff !== 0) {
+      return matchNoDiff;
+    }
+
+    return Number(right.id || 0) - Number(left.id || 0);
+  }
+
+  const queueOrderDiff = Number(left.queue_order || 0) - Number(right.queue_order || 0);
+  if (queueOrderDiff !== 0) {
+    return queueOrderDiff;
+  }
+
+  const matchNoDiff = Number(left.match_no || 0) - Number(right.match_no || 0);
+  if (matchNoDiff !== 0) {
+    return matchNoDiff;
+  }
+
+  return Number(left.id || 0) - Number(right.id || 0);
+}
+
+function getGroupStatusRank(matches = []) {
+  if (matches.some((match) => getMatchStatusRank(match) === 0)) {
+    return 0;
+  }
+
+  if (matches.some((match) => getMatchStatusRank(match) === 1)) {
+    return 1;
+  }
+
+  return 2;
+}
+
+function getGroupLiveUpcomingQueueOrder(matches = []) {
+  const queueOrders = matches
+    .filter((match) => getMatchStatusRank(match) !== 2)
+    .map((match) => Number(match.queue_order || 0))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  return queueOrders.length ? Math.min(...queueOrders) : Number.POSITIVE_INFINITY;
+}
+
+function getGroupFinishedOrder(matches = []) {
+  const finishedMatches = matches.filter((match) => getMatchStatusRank(match) === 2);
+  const latestFinishedTime = finishedMatches.reduce(
+    (latest, match) => Math.max(latest, getMatchFinishedTime(match)),
+    0
+  );
+  const highestMatchNo = finishedMatches.reduce(
+    (highest, match) => Math.max(highest, Number(match.match_no || 0)),
+    0
+  );
+
+  return {
+    latestFinishedTime,
+    highestMatchNo,
+  };
+}
+
+function getMatchGroupTitle(match) {
+  return (
+    match?.title ||
+    match?.stage ||
+    match?.round_name ||
+    match?.match_title ||
+    match?.round ||
+    "Other Matches"
+  );
+}
+
+function getGroupSortRank(title) {
+  const normalizedTitle = String(title || "").toLowerCase();
+  const tournamentOrder = [
+    "elimination",
+    "quarter-finals",
+    "semi-finals",
+    "semi-finals (upper)",
+    "semi-finals (lower)",
+    "finals",
+    "grand finals",
+  ];
+  const index = tournamentOrder.indexOf(normalizedTitle);
+  return index === -1 ? tournamentOrder.length : index;
 }
 
 function buildSwitchedMatchPayload(matchOrForm) {
@@ -80,6 +195,7 @@ function buildSwitchedMatchPayload(matchOrForm) {
 }
 
 function MatchConfig() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [matches, setMatches] = useState([]);
   const [teams, setTeams] = useState([]);
   const [casters, setCasters] = useState([]);
@@ -178,6 +294,82 @@ function MatchConfig() {
     return matches.length
       ? Math.max(...matches.map((match) => Number(match.queue_order || 0))) + 1
       : 1;
+  }, [matches]);
+
+  const groupedMatches = useMemo(() => {
+    const groupsMap = new Map();
+
+    matches.forEach((match, index) => {
+      const groupTitle = getMatchGroupTitle(match);
+      if (!groupsMap.has(groupTitle)) {
+        groupsMap.set(groupTitle, []);
+      }
+      groupsMap.get(groupTitle).push({ ...match, __groupIndex: index });
+    });
+
+    return Array.from(groupsMap.entries())
+      .map(([title, groupMatches]) => {
+        const sortedGroupMatches = [...groupMatches].sort(sortMatchesByStatusAndQueue);
+        const latestMatch = [...groupMatches].sort((left, right) => {
+          const queueOrderDiff = Number(right.queue_order || 0) - Number(left.queue_order || 0);
+          if (queueOrderDiff !== 0) {
+            return queueOrderDiff;
+          }
+
+          const matchNoDiff = Number(right.match_no || 0) - Number(left.match_no || 0);
+          if (matchNoDiff !== 0) {
+            return matchNoDiff;
+          }
+
+          return Number(right.__groupIndex || 0) - Number(left.__groupIndex || 0);
+        })[0];
+
+        return {
+          title,
+          defaultMode: latestMatch?.mode || "BO1",
+          nextQueueOrder,
+          matches: sortedGroupMatches.map(({ __groupIndex, ...match }) => match),
+        };
+      })
+      .sort((left, right) => {
+        const leftRank = getGroupStatusRank(left.matches);
+        const rightRank = getGroupStatusRank(right.matches);
+        const groupRankDiff = leftRank - rightRank;
+        if (groupRankDiff !== 0) {
+          return groupRankDiff;
+        }
+
+        if (leftRank !== 2) {
+          const queueOrderDiff =
+            getGroupLiveUpcomingQueueOrder(left.matches) -
+            getGroupLiveUpcomingQueueOrder(right.matches);
+          if (queueOrderDiff !== 0) {
+            return queueOrderDiff;
+          }
+        } else {
+          const leftFinishedOrder = getGroupFinishedOrder(left.matches);
+          const rightFinishedOrder = getGroupFinishedOrder(right.matches);
+
+          const finishedTimeDiff =
+            rightFinishedOrder.latestFinishedTime - leftFinishedOrder.latestFinishedTime;
+          if (finishedTimeDiff !== 0) {
+            return finishedTimeDiff;
+          }
+
+          const finishedMatchNoDiff =
+            rightFinishedOrder.highestMatchNo - leftFinishedOrder.highestMatchNo;
+          if (finishedMatchNoDiff !== 0) {
+            return finishedMatchNoDiff;
+          }
+        }
+
+        const groupRankFallbackDiff = getGroupSortRank(left.title) - getGroupSortRank(right.title);
+        if (groupRankFallbackDiff !== 0) {
+          return groupRankFallbackDiff;
+        }
+
+        return String(left.title || "").localeCompare(String(right.title || ""));
+      });
   }, [matches]);
 
   const teamOptions = useMemo(() => {
@@ -326,10 +518,26 @@ function MatchConfig() {
     setHasAutoSelectedCaster(casterIds.length > 0);
   };
 
-  const handleNewMatch = () => {
+  const openNewMatch = (prefill = {}) => {
     setEditingMatchId(null);
     resetMatchForm({ casterIds: getDefaultCasterIds(casters) });
+    setMatchForm((prev) => ({
+      ...prev,
+      ...prefill,
+    }));
     setIsNewMatchOpen(true);
+  };
+
+  const handleNewMatch = () => {
+    openNewMatch();
+  };
+
+  const handleAddMatchForGroup = (group) => {
+    openNewMatch({
+      title: group.title,
+      mode: group.defaultMode || "BO1",
+      queue_order: group.nextQueueOrder,
+    });
   };
 
   const handleEditMatch = (match) => {
@@ -549,6 +757,26 @@ function MatchConfig() {
     setMapDrafts({});
     setIsGamesOpen(true);
   };
+
+  useEffect(() => {
+    const requestedMatchId = searchParams.get("matchId");
+    const requestedOpen = searchParams.get("open");
+
+    if (requestedOpen !== "games" || !requestedMatchId || matches.length === 0) {
+      return;
+    }
+
+    const requestedMatch = matches.find(
+      (match) => Number(match.id) === Number(requestedMatchId)
+    );
+
+    if (!requestedMatch) {
+      return;
+    }
+
+    handleManageGames(requestedMatch.id);
+    setSearchParams({}, { replace: true });
+  }, [matches, searchParams, setSearchParams]);
 
   const openEditMatchFromManageGames = (match) => {
     setIsGamesOpen(false);
@@ -856,127 +1084,142 @@ function MatchConfig() {
       </div>
 
       <div className="match-section-stack">
-        <section className="modern-card match-queue-card">
-          <div className="panel-header">
-            <h2>Match Queue</h2>
-          </div>
-          <table className="table-modern">
-            <thead>
-              <tr>
-                <th>Match</th>
-                <th>Teams</th>
-                <th>Casters</th>
-                <th>Status</th>
-                <th>Queue</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {matches.map((match) => (
-                <tr key={match.id} className={isLiveMatch(match) ? "is-live-match" : ""}>
-                  <td data-label="Match">
-                    #{match.match_no} {match.title || ""}
-                  </td>
-                  <td data-label="Teams">
-                    <div className="match-team-score-stack">
-                      <div className="match-team-score-pill match-team-score-blue">
-                        <span className="match-team-name">
-                          {teamNameById[match.blue_team_id] || match.blue_team_id || "-"}
-                        </span>
-                        <span className="match-team-score">{match.blue_score ?? 0}</span>
-                      </div>
-                      <div className="match-team-score-pill match-team-score-red">
-                        <span className="match-team-name">
-                          {teamNameById[match.red_team_id] || match.red_team_id || "-"}
-                        </span>
-                        <span className="match-team-score">{match.red_score ?? 0}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td data-label="Casters">{formatCasterNames(match.caster_ids) || "-"}</td>
-                  <td data-label="Status">
-                    <div className="match-status-stack">
-                      <span className={statusClass(match.status)}>{match.status}</span>
-                      {Number(match.series_completed) === 1 ? (
-                        <small className="helper-text">Series Complete</small>
-                      ) : null}
-                    </div>
-                  </td>
-                  <td data-label="Queue">{match.queue_order || "-"}</td>
-                  <td data-label="Actions">
-                    <div className="match-actions">
-                      <div className="action-panel-primary">
-                        <button
-                          type="button"
-                          className="button-secondary"
-                          onClick={() => handleManageGames(match.id)}
-                        >
-                          Manage Games
-                        </button>
-                        <button
-                          type="button"
-                          className="button-ghost action-toggle"
-                          onClick={() => toggleMatchActionPanel(match.id)}
-                        >
-                          {expandedMatchActions[match.id] ? "Less" : "More"}
-                        </button>
-                      </div>
-                      {expandedMatchActions[match.id] ? (
-                        <div className="action-panel">
-                          <div className="action-group">
-                            <div className="action-group-label">Manage</div>
-                            <div className="action-buttons">
-                              <button
-                                type="button"
-                                className="button-ghost"
-                                onClick={() => handleEditMatch(match)}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="button-danger-outline button-delete"
-                                onClick={() => handleDeleteMatch(match)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                          <div className="action-group">
-                            <div className="action-group-label">Match Controls</div>
-                            <div className="action-buttons">
-                              <button
-                                type="button"
-                                className="button-ghost button-setup"
-                                onClick={() => handleSetupMatch(match.id)}
-                              >
-                                Setup
-                              </button>
-                              <button
-                                type="button"
-                                className="button-success button-start"
-                                onClick={() => handleStartMatch(match.id)}
-                              >
-                                Start
-                              </button>
-                              <button
-                                type="button"
-                                className="button-warning button-finish"
-                                onClick={() => handleFinishMatch(match.id)}
-                              >
-                                Finish
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </td>
+        {groupedMatches.map((group) => (
+          <section key={group.title} className="modern-card match-queue-card">
+            <div className="panel-header">
+              <div>
+                <h2>{group.title}</h2>
+                <div className="helper-text">
+                  {group.defaultMode || "BO1"} · {group.matches.length} match
+                  {group.matches.length === 1 ? "" : "es"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => handleAddMatchForGroup(group)}
+              >
+                {`+ Add ${group.title} Match`}
+              </button>
+            </div>
+            <table className="table-modern">
+              <thead>
+                <tr>
+                  <th>Match</th>
+                  <th>Teams</th>
+                  <th>Casters</th>
+                  <th>Status</th>
+                  <th>Queue</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+              </thead>
+              <tbody>
+                {group.matches.map((match) => (
+                  <tr key={match.id} className={isLiveMatch(match) ? "is-live-match" : ""}>
+                    <td data-label="Match">
+                      #{match.match_no} {match.title || ""}
+                    </td>
+                    <td data-label="Teams">
+                      <div className="match-team-score-stack">
+                        <div className="match-team-score-pill match-team-score-blue">
+                          <span className="match-team-name">
+                            {teamNameById[match.blue_team_id] || match.blue_team_id || "-"}
+                          </span>
+                          <span className="match-team-score">{match.blue_score ?? 0}</span>
+                        </div>
+                        <div className="match-team-score-pill match-team-score-red">
+                          <span className="match-team-name">
+                            {teamNameById[match.red_team_id] || match.red_team_id || "-"}
+                          </span>
+                          <span className="match-team-score">{match.red_score ?? 0}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td data-label="Casters">{formatCasterNames(match.caster_ids) || "-"}</td>
+                    <td data-label="Status">
+                      <div className="match-status-stack">
+                        <span className={statusClass(match.status)}>{match.status}</span>
+                        {Number(match.series_completed) === 1 ? (
+                          <small className="helper-text">Series Complete</small>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td data-label="Queue">{match.queue_order || "-"}</td>
+                    <td data-label="Actions">
+                      <div className="match-actions">
+                        <div className="action-panel-primary">
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() => handleManageGames(match.id)}
+                          >
+                            Manage Games
+                          </button>
+                          <button
+                            type="button"
+                            className="button-ghost action-toggle"
+                            onClick={() => toggleMatchActionPanel(match.id)}
+                          >
+                            {expandedMatchActions[match.id] ? "Less" : "More"}
+                          </button>
+                        </div>
+                        {expandedMatchActions[match.id] ? (
+                          <div className="action-panel">
+                            <div className="action-group">
+                              <div className="action-group-label">Manage</div>
+                              <div className="action-buttons">
+                                <button
+                                  type="button"
+                                  className="button-ghost"
+                                  onClick={() => handleEditMatch(match)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="button-danger-outline button-delete"
+                                  onClick={() => handleDeleteMatch(match)}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                            <div className="action-group">
+                              <div className="action-group-label">Match Controls</div>
+                              <div className="action-buttons">
+                                <button
+                                  type="button"
+                                  className="button-ghost button-setup"
+                                  onClick={() => handleSetupMatch(match.id)}
+                                >
+                                  Setup
+                                </button>
+                                <button
+                                  type="button"
+                                  className="button-success button-start"
+                                  onClick={() => handleStartMatch(match.id)}
+                                >
+                                  Start
+                                </button>
+                                <button
+                                  type="button"
+                                  className="button-warning button-finish"
+                                  onClick={() => handleFinishMatch(match.id)}
+                                >
+                                  Finish
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        ))}
       </div>
 
       {isNewMatchOpen

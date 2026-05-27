@@ -151,6 +151,11 @@ export const deleteDraftAction = (id) => request(`/draft/${id}`, { method: "DELE
 
 export const getCurrentOverlayData = () => request("/current-overlay-data");
 export const getSchedule = () => request("/schedule");
+export const previewBracket = (payload) =>
+  request("/bracket/preview", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 
 export const getOverlaySettings = () => request("/overlay-settings");
 export const updateOverlaySetting = (overlayKey, isEnabled) =>

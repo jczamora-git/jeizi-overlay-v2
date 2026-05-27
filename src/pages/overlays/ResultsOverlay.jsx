@@ -7,20 +7,39 @@ import "../../styles/overlays/results-overlay.css";
 
 const getSeriesLength = (mode) => {
   const normalized = String(mode || "").toUpperCase();
-  if (normalized === "BO3") return 3;
-  if (normalized === "BO5") return 5;
-  if (normalized === "BO7") return 7;
+  if (normalized === "BO3") return 2;
+  if (normalized === "BO5") return 3;
+  if (normalized === "BO7") return 4;
   return 1;
 };
 
 const getTeamShortName = (team, fallback) =>
   String(team?.shortname || team?.short_name || team?.name || fallback).toUpperCase();
 
-const getGameWinnerSide = (game, match) => {
+const getOverlayTeamsForGame = (match, game, data) => {
+  const isEvenGame = Number(game?.game_no || 1) % 2 === 0;
+  if (game) {
+    return {
+      blueTeam: isEvenGame ? data.red_team || {} : data.blue_team || {},
+      redTeam: isEvenGame ? data.blue_team || {} : data.red_team || {},
+      blueTeamId: Number(isEvenGame ? match?.red_team_id : match?.blue_team_id || 0),
+      redTeamId: Number(isEvenGame ? match?.blue_team_id : match?.red_team_id || 0),
+    };
+  }
+
+  return {
+    blueTeam: data.overlay_blue_team || data.blue_team || {},
+    redTeam: data.overlay_red_team || data.red_team || {},
+    blueTeamId: Number(data.overlay_blue_team_id || match?.blue_team_id || 0),
+    redTeamId: Number(data.overlay_red_team_id || match?.red_team_id || 0),
+  };
+};
+
+const getGameWinnerSide = (game, overlayBlueTeamId, overlayRedTeamId) => {
   const winnerTeamId = Number(game?.winner_team_id || game?.winning_team_id);
   if (!winnerTeamId) return "";
-  if (Number(match?.blue_team_id) === winnerTeamId) return "blue";
-  if (Number(match?.red_team_id) === winnerTeamId) return "red";
+  if (overlayBlueTeamId === winnerTeamId) return "blue";
+  if (overlayRedTeamId === winnerTeamId) return "red";
 
   return "";
 };
@@ -59,13 +78,25 @@ function ResultsOverlay() {
   }, []);
 
   const match = data.match || {};
-  const blueTeam = data.blue_team || {};
-  const redTeam = data.red_team || {};
   const resultGame = data.latest_finished_game || data.game || null;
+  const {
+    blueTeam,
+    redTeam,
+    blueTeamId: overlayBlueTeamId,
+    redTeamId: overlayRedTeamId,
+  } = getOverlayTeamsForGame(match, resultGame, data);
   const blueTeamShortName = getTeamShortName(blueTeam, "BLUE");
   const redTeamShortName = getTeamShortName(redTeam, "RED");
   const seriesTotal = getSeriesLength(match?.mode);
-  const winnerSide = getGameWinnerSide(resultGame, match);
+  const blueScore =
+    overlayBlueTeamId && overlayBlueTeamId === Number(match.red_team_id)
+      ? match.red_score ?? 0
+      : match.blue_score ?? 0;
+  const redScore =
+    overlayRedTeamId && overlayRedTeamId === Number(match.blue_team_id)
+      ? match.blue_score ?? 0
+      : match.red_score ?? 0;
+  const winnerSide = getGameWinnerSide(resultGame, overlayBlueTeamId, overlayRedTeamId);
   const hasRecordedResult = winnerSide === "blue" || winnerSide === "red";
   const blueResultStatus = hasRecordedResult
     ? winnerSide === "blue"
@@ -88,7 +119,7 @@ function ResultsOverlay() {
       <WinIndicators
         className="results-score-indicators results-blue-indicators"
         total={seriesTotal}
-        score={match?.blue_score ?? 0}
+        score={blueScore}
         side="blue"
         size={34}
         gap={5}
@@ -101,7 +132,7 @@ function ResultsOverlay() {
       <WinIndicators
         className="results-score-indicators results-red-indicators"
         total={seriesTotal}
-        score={match?.red_score ?? 0}
+        score={redScore}
         side="red"
         size={34}
         gap={5}

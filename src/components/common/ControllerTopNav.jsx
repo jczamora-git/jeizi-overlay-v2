@@ -5,6 +5,7 @@ const navItems = [
   { to: "/config/teams", label: "Teams" },
   { to: "/config/matches", label: "Matches" },
   { to: "/config/schedule", label: "Schedule" },
+  { to: "/config/bracket", label: "Bracket" },
   { to: "/config/draft", label: "Draft" },
   { to: "/config/heroes", label: "Heroes" },
   { to: "/config/maps", label: "Maps" },

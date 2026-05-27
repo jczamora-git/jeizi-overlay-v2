@@ -9,9 +9,9 @@ import "../../styles/overlays/gameplay-overlay.css";
 
 const getSeriesLength = (mode) => {
   const normalized = String(mode || "").toUpperCase();
-  if (normalized === "BO3") return 3;
-  if (normalized === "BO5") return 5;
-  if (normalized === "BO7") return 7;
+  if (normalized === "BO3") return 2;
+  if (normalized === "BO5") return 3;
+  if (normalized === "BO7") return 4;
   return 1;
 };
 
@@ -123,11 +123,21 @@ function GameplayOverlay() {
   }
 
   const match = data.match || {};
-  const blueTeam = data.blue_team || {};
-  const redTeam = data.red_team || {};
+  const blueTeam = data.overlay_blue_team || data.blue_team || {};
+  const redTeam = data.overlay_red_team || data.red_team || {};
   const game = data.game || {};
   const map = data.map || {};
   const seriesTotal = getSeriesLength(match.mode);
+  const overlayBlueTeamId = Number(data.overlay_blue_team_id || blueTeam.id || match.blue_team_id || 0);
+  const overlayRedTeamId = Number(data.overlay_red_team_id || redTeam.id || match.red_team_id || 0);
+  const blueScore =
+    overlayBlueTeamId && overlayBlueTeamId === Number(match.red_team_id)
+      ? match.red_score ?? 0
+      : match.blue_score ?? 0;
+  const redScore =
+    overlayRedTeamId && overlayRedTeamId === Number(match.blue_team_id)
+      ? match.blue_score ?? 0
+      : match.red_score ?? 0;
   const matchGameText = `MATCH ${match.match_no || "-"} - GAME ${game.game_no || "-"}`;
   const resolvedBlueLogo = blueTeam.logo ? resolveAssetUrl(blueTeam.logo) : "";
   const resolvedRedLogo = redTeam.logo ? resolveAssetUrl(redTeam.logo) : "";
@@ -197,7 +207,7 @@ function GameplayOverlay() {
         <WinIndicators
           className="gameplay-blue-indicators"
           total={seriesTotal}
-          score={match.blue_score ?? 0}
+          score={blueScore}
           side="blue"
           size={19}
           gap={0}
@@ -205,7 +215,7 @@ function GameplayOverlay() {
         <WinIndicators
           className="gameplay-red-indicators"
           total={seriesTotal}
-          score={match.red_score ?? 0}
+          score={redScore}
           side="red"
           size={19}
           gap={0}
