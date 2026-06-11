@@ -5,7 +5,10 @@ const API_BASE_URL =
   "http://localhost:3000";
 
 const normalizedBaseUrl = API_BASE_URL.replace(/\/$/, "").replace(/\/api$/, "");
-const apiUrl = `${normalizedBaseUrl}/api`;
+const apiUrl = (path) => {
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${normalizedBaseUrl}${cleanPath}`;
+};
 const ENABLE_SOCKET =
   import.meta.env.VITE_ENABLE_SOCKET === undefined
     ? /localhost|127\.0\.0\.1/i.test(normalizedBaseUrl)

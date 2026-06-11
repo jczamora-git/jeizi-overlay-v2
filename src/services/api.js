@@ -44,7 +44,7 @@ async function request(path, options = {}) {
         ? options.body
         : JSON.stringify(options.body);
 
-  const response = await fetch(`${apiUrl}${path}`, {
+  const response = await fetch(apiUrl(`/api${path}`), {
     ...options,
     headers,
     body,
@@ -72,7 +72,7 @@ export const deleteTeam = (id) => request(`/teams/${id}`, { method: "DELETE" });
 export const getMatches = () => request("/matches");
 export const getCurrentMatch = () => request("/matches/current");
 export const createMatch = async (payload) => {
-  const response = await fetch(`${apiUrl}/matches`, {
+  const response = await fetch(apiUrl("/api/matches"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -88,7 +88,7 @@ export const createMatch = async (payload) => {
 };
 export const deleteMatch = (id) => request(`/matches/${id}`, { method: "DELETE" });
 export async function updateMatch(id, data) {
-  const res = await fetch(`${apiUrl}/matches/${id}`, {
+  const res = await fetch(apiUrl(`/api/matches/${id}`), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
