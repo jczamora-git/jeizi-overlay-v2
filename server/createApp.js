@@ -222,6 +222,16 @@ function createApp({ io = null, restrictedCors = false } = {}) {
     }
   });
 
+  app.use((error, req, res, next) => {
+    console.error("[api error]", error);
+
+    res.status(500).json({
+      message: "Internal server error",
+      details: process.env.DEBUG_API_ERRORS === "true" ? error.message : undefined,
+      code: process.env.DEBUG_API_ERRORS === "true" ? error.code : undefined,
+    });
+  });
+
   return app;
 }
 

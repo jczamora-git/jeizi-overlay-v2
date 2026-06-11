@@ -3,6 +3,7 @@ const fs = require("fs");
 const multer = require("multer");
 
 const allowedExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".svg"]);
+const isVercel = process.env.VERCEL === "1";
 
 const sanitizeFilename = (filename) =>
   filename
@@ -24,8 +25,12 @@ const ensureDir = (dirPath) => {
   fs.mkdirSync(dirPath, { recursive: true });
 };
 
-const createStorage = (subfolder, filenameFn) =>
-  multer.diskStorage({
+const createStorage = (subfolder, filenameFn) => {
+  if (isVercel) {
+    return multer.memoryStorage();
+  }
+
+  return multer.diskStorage({
     destination: (req, file, cb) => {
       const uploadPath = path.join(__dirname, "..", "uploads", subfolder);
       ensureDir(uploadPath);
@@ -40,6 +45,7 @@ const createStorage = (subfolder, filenameFn) =>
       cb(null, `${Date.now()}-${safeName}`);
     },
   });
+};
 
 const imageFileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
@@ -82,6 +88,7 @@ const uploadCasterPhoto = createUploader("casters", (req, file) => {
 });
 
 module.exports = {
+  isVercel,
   uploadTeamLogo,
   uploadHeroImage,
   uploadMapAssets,

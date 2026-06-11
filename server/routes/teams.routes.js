@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { placeholders } = require("../db/sql");
-const { uploadTeamLogo } = require("../middleware/upload");
+const { isVercel, uploadTeamLogo } = require("../middleware/upload");
 
 const router = express.Router();
 
@@ -22,7 +22,18 @@ router.post("/", uploadTeamLogo.single("logo"), async (req, res) => {
       return res.status(400).json({ message: "Team name is required" });
     }
 
-    const logoPath = req.file ? `/uploads/teams/${req.file.filename}` : logo || null;
+    let logoPath = logo || null;
+
+    if (req.file) {
+      if (isVercel) {
+        return res.status(400).json({
+          message:
+            "Logo file upload is not supported on Vercel yet. Please use a logo URL or leave logo empty.",
+        });
+      }
+
+      logoPath = `/uploads/teams/${req.file.filename}`;
+    }
 
     const insertSql =
       db.client === "postgres"
@@ -54,6 +65,12 @@ router.put("/:id", uploadTeamLogo.single("logo"), async (req, res) => {
     const hasLogoField = Object.prototype.hasOwnProperty.call(req.body, "logo");
 
     if (req.file) {
+      if (isVercel) {
+        return res.status(400).json({
+          message:
+            "Logo file upload is not supported on Vercel yet. Please use a logo URL or leave logo empty.",
+        });
+      }
       nextLogo = `/uploads/teams/${req.file.filename}`;
     } else if (hasLogoField) {
       nextLogo = logo || null;
