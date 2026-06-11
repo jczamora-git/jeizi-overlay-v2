@@ -15,6 +15,7 @@ import OverlayControlsPage from "./pages/controller/OverlayControlsPage.jsx";
 import SchedulePage from "./pages/controller/SchedulePage.jsx";
 import StandingsPage from "./pages/controller/StandingsPage.jsx";
 import LoadingOverlay from "./pages/overlays/LoadingOverlay.jsx";
+import LoadingOverlayV2 from "./pages/overlays/LoadingOverlayV2.jsx";
 import DraftOverlay from "./pages/overlays/DraftOverlay.jsx";
 import LegacyDraftOverlay from "./pages/overlays/LegacyDraftOverlay.jsx";
 import GameplayOverlay from "./pages/overlays/GameplayOverlay.jsx";
@@ -61,6 +62,7 @@ function AppRoutes() {
       </Route>
 
       <Route path="/overlay/loading" element={<LoadingOverlay />} />
+      <Route path="/overlay/loading-v2" element={<LoadingOverlayV2 />} />
       <Route path="/overlay/draft" element={<DraftOverlay />} />
       <Route path="/overlay/legacy-draft" element={<LegacyDraftOverlay />} />
       <Route path="/overlay/gameplay" element={<GameplayOverlay />} />

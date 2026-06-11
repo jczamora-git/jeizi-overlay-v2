@@ -9,6 +9,11 @@ const overlays = [
     description: "Pre-match loading or holding scene.",
   },
   {
+    name: "Loading Overlay V2",
+    route: "/overlay/loading-v2",
+    description: "Draft pick showcase loading screen with matchup panel.",
+  },
+  {
     name: "Draft Overlay",
     route: "/overlay/draft",
     description: "Hero pick and ban draft screen.",
