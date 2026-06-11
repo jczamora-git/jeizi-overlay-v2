@@ -64,8 +64,11 @@ function createApp({ io = null, restrictedCors = false } = {}) {
     } catch (error) {
       console.error("[db-test route error]", error);
       res.status(500).json({
+        ok: false,
         message: "Failed to test database connection",
+        client: db.client || process.env.DB_CLIENT || "unknown",
         details: process.env.DEBUG_API_ERRORS === "true" ? error.message : undefined,
+        code: process.env.DEBUG_API_ERRORS === "true" ? error.code : undefined,
       });
     }
   });
