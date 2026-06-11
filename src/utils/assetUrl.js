@@ -1,4 +1,4 @@
-const API_ORIGIN = import.meta.env.VITE_API_ORIGIN || "http://localhost:3000";
+import { normalizedBaseUrl } from "../config/api";
 
 export function resolveAssetUrl(path) {
   if (!path) return "";
@@ -11,7 +11,7 @@ export function resolveAssetUrl(path) {
   }
 
   if (cleanPath.startsWith("/uploads/")) {
-    return `${API_ORIGIN}${cleanPath}`;
+    return `${normalizedBaseUrl}${cleanPath}`;
   }
 
   if (cleanPath.startsWith("/legacy/")) {
@@ -19,7 +19,7 @@ export function resolveAssetUrl(path) {
   }
 
   if (cleanPath.startsWith("uploads/")) {
-    return `${API_ORIGIN}/${cleanPath}`;
+    return `${normalizedBaseUrl}/${cleanPath}`;
   }
 
   if (cleanPath.startsWith("legacy/")) {

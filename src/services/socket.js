@@ -1,9 +1,7 @@
 import { io } from "socket.io-client";
+import { normalizedBaseUrl } from "../config/api";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
-const SOCKET_URL = API_BASE.replace(/\/api\/?$/, "");
-
-export const socket = io(SOCKET_URL, {
+export const socket = io(normalizedBaseUrl, {
   transports: ["websocket", "polling"],
   autoConnect: true,
 });

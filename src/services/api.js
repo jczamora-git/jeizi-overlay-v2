@@ -1,5 +1,4 @@
-const API_ORIGIN = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_ORIGIN || "http://localhost:3000";
-const API_BASE = `${API_ORIGIN.replace(/\/$/, "").replace(/\/api$/, "")}/api`;
+import { apiUrl } from "../config/api";
 
 const cleanErrorMessage = (text, response) => {
   if (!text) {
@@ -45,7 +44,7 @@ async function request(path, options = {}) {
         ? options.body
         : JSON.stringify(options.body);
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${apiUrl}${path}`, {
     ...options,
     headers,
     body,
@@ -73,7 +72,7 @@ export const deleteTeam = (id) => request(`/teams/${id}`, { method: "DELETE" });
 export const getMatches = () => request("/matches");
 export const getCurrentMatch = () => request("/matches/current");
 export const createMatch = async (payload) => {
-  const response = await fetch("/api/matches", {
+  const response = await fetch(`${apiUrl}/matches`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -89,7 +88,7 @@ export const createMatch = async (payload) => {
 };
 export const deleteMatch = (id) => request(`/matches/${id}`, { method: "DELETE" });
 export async function updateMatch(id, data) {
-  const res = await fetch(`/api/matches/${id}`, {
+  const res = await fetch(`${apiUrl}/matches/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
