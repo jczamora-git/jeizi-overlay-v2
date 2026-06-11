@@ -53,6 +53,23 @@ function createApp({ io = null, restrictedCors = false } = {}) {
     });
   });
 
+  app.get("/api/db-test", async (req, res) => {
+    try {
+      const [rows] = await db.query("SELECT NOW() AS now");
+      res.json({
+        ok: true,
+        client: db.client,
+        rows,
+      });
+    } catch (error) {
+      console.error("[db-test route error]", error);
+      res.status(500).json({
+        message: "Failed to test database connection",
+        details: process.env.DEBUG_API_ERRORS === "true" ? error.message : undefined,
+      });
+    }
+  });
+
   app.use("/api/teams", teamsRoutes);
   app.use("/api/matches", matchesRoutes);
   app.use("/api/games", gamesRoutes);

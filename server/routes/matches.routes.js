@@ -14,6 +14,77 @@ const allowedTitles = new Set([
   "Finals",
 ]);
 
+const matchListColumns = [
+  "id",
+  "match_no",
+  "blue_team_id",
+  "red_team_id",
+  "mode",
+  "title",
+  "blue_score",
+  "red_score",
+  "caster_ids",
+  "queue_order",
+  "series_completed",
+  "series_completed_at",
+  "series_winner_team_id",
+  "status",
+  "created_at",
+  "updated_at",
+];
+
+let postgresMatchColumnsPromise;
+
+async function getPostgresMatchColumns() {
+  if (!postgresMatchColumnsPromise) {
+    postgresMatchColumnsPromise = db
+      .query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'matches'`
+      )
+      .then(([rows]) => new Set(rows.map((row) => row.column_name)))
+      .catch((error) => {
+        postgresMatchColumnsPromise = null;
+        throw error;
+      });
+  }
+
+  return postgresMatchColumnsPromise;
+}
+
+async function fetchMatchList() {
+  if (db.client !== "postgres") {
+    return db.query("SELECT * FROM matches ORDER BY queue_order ASC");
+  }
+
+  const availableColumns = await getPostgresMatchColumns();
+  const selectSql = matchListColumns
+    .map((column) => {
+      if (availableColumns.has(column)) {
+        return column;
+      }
+
+      if (column === "blue_score" || column === "red_score" || column === "series_completed") {
+        return `0 AS ${column}`;
+      }
+
+      if (column === "status") {
+        return `'queued' AS ${column}`;
+      }
+
+      return `NULL AS ${column}`;
+    })
+    .join(", ");
+
+  const orderBySql = availableColumns.has("queue_order")
+    ? "ORDER BY COALESCE(queue_order, 999999) ASC, id ASC"
+    : "ORDER BY id ASC";
+
+  return db.query(`SELECT ${selectSql} FROM matches ${orderBySql}`);
+}
+
 function normalizeCasterIds(value) {
   if (value === undefined) {
     return undefined;
@@ -37,11 +108,14 @@ function normalizeCasterIds(value) {
 
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT * FROM matches ORDER BY queue_order ASC");
+    const [rows] = await fetchMatchList();
     res.json(rows);
   } catch (error) {
-    console.error("Failed to fetch matches", error);
-    res.status(500).json({ message: "Failed to fetch matches" });
+    console.error("[matches route error]", error);
+    res.status(500).json({
+      message: "Failed to fetch matches",
+      details: process.env.DEBUG_API_ERRORS === "true" ? error.message : undefined,
+    });
   }
 });
 
@@ -52,8 +126,11 @@ router.get("/current", async (req, res) => {
     );
     res.json(rows[0] || null);
   } catch (error) {
-    console.error("Failed to fetch current match", error);
-    res.status(500).json({ message: "Failed to fetch current match" });
+    console.error("[current match route error]", error);
+    res.status(500).json({
+      message: "Failed to fetch current match",
+      details: process.env.DEBUG_API_ERRORS === "true" ? error.message : undefined,
+    });
   }
 });
 
