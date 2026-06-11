@@ -1,5 +1,6 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
+const { placeholders } = require("../db/sql");
 const { getMaxGamesByMode, recalculateMatchSeriesState } = require("../matchSeries");
 
 const router = express.Router();
@@ -36,7 +37,7 @@ function normalizeCasterIds(value) {
 
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT * FROM matches ORDER BY queue_order ASC");
+    const [rows] = await db.query("SELECT * FROM matches ORDER BY queue_order ASC");
     res.json(rows);
   } catch (error) {
     console.error("Failed to fetch matches", error);
@@ -46,7 +47,7 @@ router.get("/", async (req, res) => {
 
 router.get("/current", async (req, res) => {
   try {
-    const [rows] = await pool.query(
+    const [rows] = await db.query(
       "SELECT * FROM matches WHERE status IN ('active','live') ORDER BY queue_order ASC LIMIT 1"
     );
     res.json(rows[0] || null);
@@ -57,7 +58,7 @@ router.get("/current", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   let transactionStarted = false;
   try {
     const {
@@ -94,7 +95,7 @@ router.post("/", async (req, res) => {
 
     let finalMatchNo = match_no;
     if (!finalMatchNo) {
-      const [rows] = await pool.query(
+      const [rows] = await db.query(
         "SELECT COALESCE(MAX(match_no), 0) + 1 AS next_match_no FROM matches"
       );
       finalMatchNo = rows[0]?.next_match_no || 1;
@@ -102,7 +103,7 @@ router.post("/", async (req, res) => {
 
     let finalQueueOrder = queue_order;
     if (!finalQueueOrder && finalQueueOrder !== 0) {
-      const [rows] = await pool.query(
+      const [rows] = await db.query(
         "SELECT COALESCE(MAX(queue_order), 0) + 1 AS next_queue_order FROM matches"
       );
       finalQueueOrder = rows[0]?.next_queue_order || 1;
@@ -111,8 +112,12 @@ router.post("/", async (req, res) => {
     await connection.beginTransaction();
     transactionStarted = true;
 
-    const [result] = await connection.query(
-      "INSERT INTO matches (match_no, blue_team_id, red_team_id, mode, title, caster_ids, queue_order, blue_score, red_score, status) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    const insertSql =
+      db.client === "postgres"
+        ? "INSERT INTO matches (match_no, blue_team_id, red_team_id, mode, title, caster_ids, queue_order, blue_score, red_score, status) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id"
+        : "INSERT INTO matches (match_no, blue_team_id, red_team_id, mode, title, caster_ids, queue_order, blue_score, red_score, status) VALUES (?,?,?,?,?,?,?,?,?,?)";
+    const [, result] = await connection.query(
+      insertSql,
       [
         finalMatchNo,
         blue_team_id,
@@ -135,9 +140,16 @@ router.post("/", async (req, res) => {
       gameValues.push([matchId, gameNo, null, "setup"]);
     }
 
+    const gameValueSql = [];
+    const gameParams = [];
+    gameValues.forEach((gameValue, index) => {
+      gameValueSql.push(`(${placeholders(gameValue.length, index * gameValue.length + 1)})`);
+      gameParams.push(...gameValue);
+    });
+
     await connection.query(
-      "INSERT INTO games (match_id, game_no, map_id, status) VALUES ?",
-      [gameValues]
+      `INSERT INTO games (match_id, game_no, map_id, status) VALUES ${gameValueSql.join(", ")}`,
+      gameParams
     );
 
     await connection.commit();
@@ -179,7 +191,7 @@ router.put("/:id", async (req, res) => {
       status,
     } = req.body;
 
-    const [rows] = await pool.query("SELECT * FROM matches WHERE id = ?", [id]);
+    const [rows] = await db.query("SELECT * FROM matches WHERE id = ?", [id]);
     const existingMatch = rows[0];
 
     if (!existingMatch) {
@@ -222,7 +234,7 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    await pool.query(
+    await db.query(
       "UPDATE matches SET match_no = ?, blue_team_id = ?, red_team_id = ?, mode = ?, title = ?, caster_ids = ?, queue_order = ?, blue_score = ?, red_score = ?, status = ? WHERE id = ?",
       [
         finalMatchNo,
@@ -257,7 +269,7 @@ router.put("/:id", async (req, res) => {
 });
 
 router.put("/:id/set-active", async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   try {
     const { id } = req.params;
 
@@ -284,7 +296,7 @@ router.put("/:id/set-active", async (req, res) => {
 });
 
 router.put("/:id/start", async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   try {
     const { id } = req.params;
     const matchId = Number(id);
@@ -328,7 +340,7 @@ router.put("/:id/finish", async (req, res) => {
   try {
     const { id } = req.params;
     await recalculateMatchSeriesState(id);
-    await pool.query("UPDATE matches SET status = 'finished' WHERE id = ?", [id]);
+    await db.query("UPDATE matches SET status = 'finished' WHERE id = ?", [id]);
     const io = req.app.get("io");
     if (io) {
       io.emit("matches:changed");
@@ -346,7 +358,7 @@ router.put("/:id/score", async (req, res) => {
   try {
     const { id } = req.params;
     const { blue_score, red_score } = req.body;
-    await pool.query("UPDATE matches SET blue_score = ?, red_score = ? WHERE id = ?", [
+    await db.query("UPDATE matches SET blue_score = ?, red_score = ? WHERE id = ?", [
       blue_score,
       red_score,
       id,
@@ -364,7 +376,7 @@ router.put("/:id/score", async (req, res) => {
 });
 
 router.put("/load-next", async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
     const [nextRows] = await connection.query(
@@ -402,7 +414,7 @@ router.put("/load-next", async (req, res) => {
 });
 
 router.delete("/:id", async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   try {
     const { id } = req.params;
     await connection.beginTransaction();

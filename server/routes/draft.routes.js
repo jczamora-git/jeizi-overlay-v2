@@ -1,5 +1,5 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
 
 const router = express.Router();
 
@@ -11,7 +11,7 @@ router.get("/session", async (req, res) => {
       return res.status(400).json({ message: "match_id and game_number are required" });
     }
 
-    const [rows] = await pool.query(
+    const [rows] = await db.query(
       "SELECT * FROM draft_sessions WHERE match_id = ? AND game_number = ? LIMIT 1",
       [matchId, gameNumber]
     );
@@ -43,24 +43,25 @@ router.post("/session", async (req, res) => {
       return res.status(400).json({ message: "match_id and game_number are required" });
     }
 
-    const [result] = await pool.query(
-      "INSERT INTO draft_sessions (match_id, game_id, game_number, blue_team_id, red_team_id, mode, phase_index, phase_label, timer_remaining, timer_running, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-      [
-        match_id,
-        game_id || null,
-        game_number,
-        blue_team_id || null,
-        red_team_id || null,
-        mode || null,
-        phase_index ?? 0,
-        phase_label || null,
-        timer_remaining ?? null,
-        timer_running ? 1 : 0,
-        status || null,
-      ]
-    );
+    const insertSql =
+      db.client === "postgres"
+        ? "INSERT INTO draft_sessions (match_id, game_id, game_number, blue_team_id, red_team_id, mode, phase_index, phase_label, timer_remaining, timer_running, status) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id"
+        : "INSERT INTO draft_sessions (match_id, game_id, game_number, blue_team_id, red_team_id, mode, phase_index, phase_label, timer_remaining, timer_running, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+    const [, result] = await db.query(insertSql, [
+      match_id,
+      game_id || null,
+      game_number,
+      blue_team_id || null,
+      red_team_id || null,
+      mode || null,
+      phase_index ?? 0,
+      phase_label || null,
+      timer_remaining ?? null,
+      timer_running ? 1 : 0,
+      status || null,
+    ]);
 
-    const [rows] = await pool.query("SELECT * FROM draft_sessions WHERE id = ?", [
+    const [rows] = await db.query("SELECT * FROM draft_sessions WHERE id = ?", [
       result.insertId,
     ]);
 
@@ -94,7 +95,7 @@ router.patch("/session/:id", async (req, res) => {
       clear_locked_at,
     } = req.body;
 
-    await pool.query(
+    await db.query(
       "UPDATE draft_sessions SET match_id = COALESCE(?, match_id), game_id = COALESCE(?, game_id), game_number = COALESCE(?, game_number), blue_team_id = COALESCE(?, blue_team_id), red_team_id = COALESCE(?, red_team_id), mode = COALESCE(?, mode), phase_index = COALESCE(?, phase_index), phase_label = COALESCE(?, phase_label), timer_remaining = COALESCE(?, timer_remaining), timer_running = COALESCE(?, timer_running), status = COALESCE(?, status), started_at = CASE WHEN ? THEN NOW() WHEN ? THEN NULL ELSE started_at END, completed_at = CASE WHEN ? THEN NOW() WHEN ? THEN NULL ELSE completed_at END, locked_at = CASE WHEN ? THEN NOW() WHEN ? THEN NULL ELSE locked_at END WHERE id = ?",
       [
         match_id ?? null,
@@ -118,7 +119,7 @@ router.patch("/session/:id", async (req, res) => {
       ]
     );
 
-    const [rows] = await pool.query("SELECT * FROM draft_sessions WHERE id = ?", [id]);
+    const [rows] = await db.query("SELECT * FROM draft_sessions WHERE id = ?", [id]);
     res.json(rows[0] || null);
   } catch (error) {
     console.error("Failed to update draft session", error);
@@ -129,7 +130,7 @@ router.patch("/session/:id", async (req, res) => {
 router.get("/sessions/:sessionId/slots", async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const [rows] = await pool.query(
+    const [rows] = await db.query(
       "SELECT * FROM draft_slots WHERE draft_session_id = ? ORDER BY team_side, slot_type, slot_index",
       [sessionId]
     );
@@ -161,7 +162,7 @@ router.put("/sessions/:sessionId/slots", async (req, res) => {
       return res.status(400).json({ message: "slot data is required" });
     }
 
-    const [existingRows] = await pool.query(
+    const [existingRows] = await db.query(
       "SELECT id FROM draft_slots WHERE draft_session_id = ? AND team_side = ? AND slot_type = ? AND slot_index = ? LIMIT 1",
       [sessionId, team_side, slot_type, slot_index]
     );
@@ -169,7 +170,7 @@ router.put("/sessions/:sessionId/slots", async (req, res) => {
     const lockedAt = is_locked ? new Date() : null;
 
     if (existingRows.length) {
-      await pool.query(
+      await db.query(
         "UPDATE draft_slots SET phase_index = ?, phase_label = ?, hero_id = ?, hero_name = ?, hero_role = ?, hero_lane = ?, hero_image_path = ?, is_locked = ?, locked_at = ? WHERE id = ?",
         [
           phase_index ?? null,
@@ -187,24 +188,25 @@ router.put("/sessions/:sessionId/slots", async (req, res) => {
       return res.json({ id: existingRows[0].id });
     }
 
-    const [result] = await pool.query(
-      "INSERT INTO draft_slots (draft_session_id, team_side, slot_type, slot_index, phase_index, phase_label, hero_id, hero_name, hero_role, hero_lane, hero_image_path, is_locked, locked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-      [
-        sessionId,
-        team_side,
-        slot_type,
-        slot_index,
-        phase_index ?? null,
-        phase_label ?? null,
-        hero_id ?? null,
-        hero_name ?? null,
-        hero_role ?? null,
-        hero_lane ?? null,
-        hero_image_path ?? null,
-        is_locked ? 1 : 0,
-        lockedAt,
-      ]
-    );
+    const insertSlotSql =
+      db.client === "postgres"
+        ? "INSERT INTO draft_slots (draft_session_id, team_side, slot_type, slot_index, phase_index, phase_label, hero_id, hero_name, hero_role, hero_lane, hero_image_path, is_locked, locked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id"
+        : "INSERT INTO draft_slots (draft_session_id, team_side, slot_type, slot_index, phase_index, phase_label, hero_id, hero_name, hero_role, hero_lane, hero_image_path, is_locked, locked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    const [, result] = await db.query(insertSlotSql, [
+      sessionId,
+      team_side,
+      slot_type,
+      slot_index,
+      phase_index ?? null,
+      phase_label ?? null,
+      hero_id ?? null,
+      hero_name ?? null,
+      hero_role ?? null,
+      hero_lane ?? null,
+      hero_image_path ?? null,
+      is_locked ? 1 : 0,
+      lockedAt,
+    ]);
 
     res.status(201).json({ id: result.insertId });
   } catch (error) {
@@ -216,7 +218,7 @@ router.put("/sessions/:sessionId/slots", async (req, res) => {
 router.delete("/sessions/:sessionId/slots", async (req, res) => {
   try {
     const { sessionId } = req.params;
-    await pool.query("DELETE FROM draft_slots WHERE draft_session_id = ?", [sessionId]);
+    await db.query("DELETE FROM draft_slots WHERE draft_session_id = ?", [sessionId]);
     res.status(204).send();
   } catch (error) {
     console.error("Failed to clear draft slots", error);
@@ -251,7 +253,7 @@ router.post("/sessions/:sessionId/save-slots", async (req, res) => {
         continue;
       }
 
-      const [existingRows] = await pool.query(
+      const [existingRows] = await db.query(
         "SELECT id FROM draft_slots WHERE draft_session_id = ? AND team_side = ? AND slot_type = ? AND slot_index = ? LIMIT 1",
         [sessionId, team_side, slot_type, slot_index]
       );
@@ -259,7 +261,7 @@ router.post("/sessions/:sessionId/save-slots", async (req, res) => {
       const lockedAt = is_locked ? new Date() : null;
 
       if (existingRows.length) {
-        await pool.query(
+        await db.query(
           "UPDATE draft_slots SET phase_index = ?, phase_label = ?, hero_id = ?, hero_name = ?, hero_role = ?, hero_lane = ?, hero_image_path = ?, is_locked = ?, locked_at = ? WHERE id = ?",
           [
             phase_index ?? null,
@@ -275,7 +277,7 @@ router.post("/sessions/:sessionId/save-slots", async (req, res) => {
           ]
         );
       } else {
-        await pool.query(
+        await db.query(
           "INSERT INTO draft_slots (draft_session_id, team_side, slot_type, slot_index, phase_index, phase_label, hero_id, hero_name, hero_role, hero_lane, hero_image_path, is_locked, locked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
           [
             sessionId,
@@ -296,10 +298,10 @@ router.post("/sessions/:sessionId/save-slots", async (req, res) => {
       }
     }
 
-    await pool.query(
-      "UPDATE draft_sessions SET status = COALESCE(?, status) WHERE id = ?",
-      ["completed", sessionId]
-    );
+    await db.query("UPDATE draft_sessions SET status = COALESCE(?, status) WHERE id = ?", [
+      "completed",
+      sessionId,
+    ]);
 
     res.status(201).json({ saved: slots.length });
   } catch (error) {
@@ -311,7 +313,7 @@ router.post("/sessions/:sessionId/save-slots", async (req, res) => {
 router.get("/:gameId", async (req, res) => {
   try {
     const { gameId } = req.params;
-    const [rows] = await pool.query(
+    const [rows] = await db.query(
       "SELECT da.*, h.name AS hero_name, h.image_path AS hero_image_path FROM draft_actions da LEFT JOIN heroes h ON da.hero_id = h.id WHERE da.game_id = ? ORDER BY da.action_order ASC",
       [gameId]
     );
@@ -337,21 +339,22 @@ router.post("/", async (req, res) => {
       locked,
     } = req.body;
 
-    const [result] = await pool.query(
-      "INSERT INTO draft_actions (draft_session_id, game_id, team_side, action_type, hero_id, action_order, phase_index, phase_label, slot_index, locked) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      [
-        draft_session_id || null,
-        game_id || null,
-        team_side,
-        action_type,
-        hero_id || null,
-        action_order || null,
-        phase_index ?? null,
-        phase_label ?? null,
-        slot_index ?? null,
-        locked ? 1 : 0,
-      ]
-    );
+    const insertActionSql =
+      db.client === "postgres"
+        ? "INSERT INTO draft_actions (draft_session_id, game_id, team_side, action_type, hero_id, action_order, phase_index, phase_label, slot_index, locked) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id"
+        : "INSERT INTO draft_actions (draft_session_id, game_id, team_side, action_type, hero_id, action_order, phase_index, phase_label, slot_index, locked) VALUES (?,?,?,?,?,?,?,?,?,?)";
+    const [, result] = await db.query(insertActionSql, [
+      draft_session_id || null,
+      game_id || null,
+      team_side,
+      action_type,
+      hero_id || null,
+      action_order || null,
+      phase_index ?? null,
+      phase_label ?? null,
+      slot_index ?? null,
+      locked ? 1 : 0,
+    ]);
 
     res.status(201).json({ id: result.insertId });
   } catch (error) {
@@ -365,7 +368,7 @@ router.put("/:id", async (req, res) => {
     const { id } = req.params;
     const { game_id, team_side, action_type, hero_id, action_order, locked } = req.body;
 
-    await pool.query(
+    await db.query(
       "UPDATE draft_actions SET game_id = ?, team_side = ?, action_type = ?, hero_id = ?, action_order = ?, locked = ? WHERE id = ?",
       [game_id, team_side, action_type, hero_id, action_order, locked ? 1 : 0, id]
     );
@@ -380,7 +383,7 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.query("DELETE FROM draft_actions WHERE id = ?", [id]);
+    await db.query("DELETE FROM draft_actions WHERE id = ?", [id]);
     res.status(204).send();
   } catch (error) {
     console.error("Failed to delete draft action", error);

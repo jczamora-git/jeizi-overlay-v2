@@ -1,12 +1,12 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
 const { uploadCasterPhoto } = require("../middleware/upload");
 
 const router = express.Router();
 
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT id, name, photo FROM casters ORDER BY name ASC");
+    const [rows] = await db.query("SELECT id, name, photo FROM casters ORDER BY name ASC");
     res.json(rows);
   } catch (error) {
     console.error("Failed to fetch casters", error);
@@ -23,8 +23,12 @@ router.post("/", uploadCasterPhoto.single("photo"), async (req, res) => {
 
     const photoPath = req.file ? `/uploads/casters/${req.file.filename}` : photo || null;
 
-    const [result] = await pool.query(
-      "INSERT INTO casters (name, photo) VALUES (?,?)",
+    const insertSql =
+      db.client === "postgres"
+        ? "INSERT INTO casters (name, photo) VALUES (?, ?) RETURNING id"
+        : "INSERT INTO casters (name, photo) VALUES (?, ?)";
+    const [, result] = await db.query(
+      insertSql,
       [name, photoPath]
     );
 
@@ -40,7 +44,7 @@ router.put("/:id", uploadCasterPhoto.single("photo"), async (req, res) => {
     const { id } = req.params;
     const { name, photo } = req.body;
 
-    const [existingRows] = await pool.query("SELECT photo FROM casters WHERE id = ?", [id]);
+    const [existingRows] = await db.query("SELECT photo FROM casters WHERE id = ?", [id]);
     if (!existingRows.length) {
       return res.status(404).json({ message: "Caster not found" });
     }
@@ -54,7 +58,7 @@ router.put("/:id", uploadCasterPhoto.single("photo"), async (req, res) => {
       nextPhoto = photo || null;
     }
 
-    await pool.query("UPDATE casters SET name = ?, photo = ? WHERE id = ?", [
+    await db.query("UPDATE casters SET name = ?, photo = ? WHERE id = ?", [
       name,
       nextPhoto,
       id,
@@ -70,7 +74,7 @@ router.put("/:id", uploadCasterPhoto.single("photo"), async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.query("DELETE FROM casters WHERE id = ?", [id]);
+    await db.query("DELETE FROM casters WHERE id = ?", [id]);
     res.status(204).send();
   } catch (error) {
     console.error("Failed to delete caster", error);

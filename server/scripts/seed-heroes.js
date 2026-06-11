@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { pool } = require("../db");
+const db = require("../db");
 
 const HERO_META = {
   akai: { name: "Akai", role: "Tank, Support" },
@@ -45,20 +45,32 @@ const getHeroFiles = (dirPath) => {
 };
 
 const getLaneColumn = async () => {
-  const [columns] = await pool.query("SHOW COLUMNS FROM heroes");
+  if (db.client === "postgres") {
+    const [columns] = await db.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'heroes'`
+    );
+    return columns.some((column) => column.column_name === "lane");
+  }
+
+  const [columns] = await db.query("SHOW COLUMNS FROM heroes");
   return columns.some((column) => column.Field === "lane");
 };
 
 const upsertHero = async ({ name, role, image_path, lane, hasLane }) => {
-  const [rows] = await pool.query("SELECT id FROM heroes WHERE name = ? LIMIT 1", [name]);
+  const [rows] = await db.query("SELECT id FROM heroes WHERE name = ? LIMIT 1", [name]);
   if (rows.length) {
     if (hasLane) {
-      await pool.query(
-        "UPDATE heroes SET role = ?, image_path = ?, lane = ? WHERE id = ?",
-        [role, image_path, lane, rows[0].id]
-      );
+      await db.query("UPDATE heroes SET role = ?, image_path = ?, lane = ? WHERE id = ?", [
+        role,
+        image_path,
+        lane,
+        rows[0].id,
+      ]);
     } else {
-      await pool.query("UPDATE heroes SET role = ?, image_path = ? WHERE id = ?", [
+      await db.query("UPDATE heroes SET role = ?, image_path = ? WHERE id = ?", [
         role,
         image_path,
         rows[0].id,
@@ -68,14 +80,14 @@ const upsertHero = async ({ name, role, image_path, lane, hasLane }) => {
   }
 
   if (hasLane) {
-    await pool.query("INSERT INTO heroes (name, role, image_path, lane) VALUES (?,?,?,?)", [
+    await db.query("INSERT INTO heroes (name, role, image_path, lane) VALUES (?,?,?,?)", [
       name,
       role,
       image_path,
       lane,
     ]);
   } else {
-    await pool.query("INSERT INTO heroes (name, role, image_path) VALUES (?,?,?)", [
+    await db.query("INSERT INTO heroes (name, role, image_path) VALUES (?,?,?)", [
       name,
       role,
       image_path,
@@ -135,5 +147,5 @@ run()
     console.error("Seed failed", error);
   })
   .finally(() => {
-    pool.end();
+    db.end();
   });

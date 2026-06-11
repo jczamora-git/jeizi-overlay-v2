@@ -1,4 +1,4 @@
-const { pool } = require("./db");
+const db = require("./db");
 
 function getRequiredWins(mode) {
   return Math.ceil(getMaxGamesByMode(mode) / 2);
@@ -19,7 +19,7 @@ function getReopenedMatchStatus(hasOtherLiveMatch) {
   return hasOtherLiveMatch ? "queued" : "live";
 }
 
-async function recalculateMatchSeriesState(matchId, connection = pool) {
+async function recalculateMatchSeriesState(matchId, connection = db) {
   if (!matchId) {
     return null;
   }

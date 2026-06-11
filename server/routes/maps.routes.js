@@ -1,5 +1,5 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
 const { uploadMapAssets } = require("../middleware/upload");
 
 const router = express.Router();
@@ -16,7 +16,7 @@ const getUploadedPath = (files, fieldName) => {
 
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await pool.query(
+    const [rows] = await db.query(
       "SELECT id, name, icon_path, map_image, created_at, updated_at FROM maps ORDER BY name ASC"
     );
     res.json(rows);
@@ -36,12 +36,16 @@ router.post("/", uploadMapFields, async (req, res) => {
     const nextIconPath = getUploadedPath(req.files, "icon") || icon_path || null;
     const nextMapImage = getUploadedPath(req.files, "map_image");
 
-    const [result] = await pool.query(
-      "INSERT INTO maps (name, icon_path, map_image) VALUES (?, ?, ?)",
+    const insertSql =
+      db.client === "postgres"
+        ? "INSERT INTO maps (name, icon_path, map_image) VALUES (?, ?, ?) RETURNING id"
+        : "INSERT INTO maps (name, icon_path, map_image) VALUES (?, ?, ?)";
+    const [, result] = await db.query(
+      insertSql,
       [name, nextIconPath, nextMapImage]
     );
 
-    const [rows] = await pool.query(
+    const [rows] = await db.query(
       "SELECT id, name, icon_path, map_image, created_at, updated_at FROM maps WHERE id = ?",
       [result.insertId]
     );
@@ -66,7 +70,7 @@ router.put("/:id", uploadMapFields, async (req, res) => {
       return res.status(400).json({ message: "Map name is required" });
     }
 
-    const [existingRows] = await pool.query(
+    const [existingRows] = await db.query(
       "SELECT id, icon_path, map_image FROM maps WHERE id = ?",
       [id]
     );
@@ -88,12 +92,12 @@ router.put("/:id", uploadMapFields, async (req, res) => {
 
     const nextMapImage = uploadedMapImagePath || existingMap.map_image || null;
 
-    await pool.query(
+    await db.query(
       "UPDATE maps SET name = ?, icon_path = ?, map_image = ?, updated_at = NOW() WHERE id = ?",
       [name, nextIconPath, nextMapImage, id]
     );
 
-    const [rows] = await pool.query(
+    const [rows] = await db.query(
       "SELECT id, name, icon_path, map_image, created_at, updated_at FROM maps WHERE id = ?",
       [id]
     );
@@ -108,7 +112,7 @@ router.put("/:id", uploadMapFields, async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.query("DELETE FROM maps WHERE id = ?", [id]);
+    await db.query("DELETE FROM maps WHERE id = ?", [id]);
     res.status(204).send();
   } catch (error) {
     console.error("Failed to delete map", error);

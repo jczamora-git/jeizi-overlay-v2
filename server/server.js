@@ -3,7 +3,8 @@ const cors = require("cors");
 const http = require("http");
 const path = require("path");
 const { Server } = require("socket.io");
-const { pool } = require("./db");
+const db = require("./db");
+const { placeholders } = require("./db/sql");
 
 const teamsRoutes = require("./routes/teams.routes");
 const matchesRoutes = require("./routes/matches.routes");
@@ -47,7 +48,7 @@ app.use("/api/bracket", bracketRoutes);
 
 app.get("/api/current-overlay-data", async (req, res) => {
   try {
-    let [matchRows] = await pool.query(
+    let [matchRows] = await db.query(
       `SELECT *
        FROM matches
        WHERE LOWER(status) IN ('live', 'active', 'ongoing')
@@ -56,7 +57,7 @@ app.get("/api/current-overlay-data", async (req, res) => {
     );
 
     if (!matchRows.length) {
-      [matchRows] = await pool.query(
+      [matchRows] = await db.query(
         `SELECT *
          FROM matches
          WHERE series_completed = 1
@@ -66,7 +67,7 @@ app.get("/api/current-overlay-data", async (req, res) => {
     }
 
     if (!matchRows.length) {
-      [matchRows] = await pool.query(
+      [matchRows] = await db.query(
         `SELECT *
          FROM matches
          WHERE LOWER(status) IN ('finished', 'done', 'completed')
@@ -76,7 +77,7 @@ app.get("/api/current-overlay-data", async (req, res) => {
     }
 
     if (!matchRows.length) {
-      [matchRows] = await pool.query(
+      [matchRows] = await db.query(
         `SELECT *
          FROM matches
          ORDER BY updated_at DESC, created_at DESC, id DESC
@@ -98,26 +99,26 @@ app.get("/api/current-overlay-data", async (req, res) => {
 
     if (match) {
       if (match.blue_team_id) {
-        const [blueRows] = await pool.query("SELECT * FROM teams WHERE id = ?", [
+        const [blueRows] = await db.query("SELECT * FROM teams WHERE id = ?", [
           match.blue_team_id,
         ]);
         blueTeam = blueRows[0] || null;
       }
 
       if (match.red_team_id) {
-        const [redRows] = await pool.query("SELECT * FROM teams WHERE id = ?", [
+        const [redRows] = await db.query("SELECT * FROM teams WHERE id = ?", [
           match.red_team_id,
         ]);
         redTeam = redRows[0] || null;
       }
 
-      const [gameRows] = await pool.query(
+      const [gameRows] = await db.query(
         "SELECT * FROM games WHERE match_id = ? AND status IN ('setup','drafting','live') ORDER BY game_no ASC LIMIT 1",
         [match.id]
       );
       game = gameRows[0] || null;
 
-      const [finishedGameRows] = await pool.query(
+      const [finishedGameRows] = await db.query(
         `SELECT *
          FROM games
          WHERE match_id = ?
@@ -130,14 +131,14 @@ app.get("/api/current-overlay-data", async (req, res) => {
       latestFinishedGame = finishedGameRows[0] || null;
 
       if (game && game.map_id) {
-        const [mapRows] = await pool.query("SELECT * FROM maps WHERE id = ?", [
+        const [mapRows] = await db.query("SELECT * FROM maps WHERE id = ?", [
           game.map_id,
         ]);
         map = mapRows[0] || null;
       }
 
       if (game) {
-        const [draftRows] = await pool.query(
+        const [draftRows] = await db.query(
           "SELECT da.*, h.name AS hero_name, h.image_path AS hero_image_path FROM draft_actions da LEFT JOIN heroes h ON da.hero_id = h.id WHERE da.game_id = ? ORDER BY da.action_order ASC",
           [game.id]
         );
@@ -152,9 +153,8 @@ app.get("/api/current-overlay-data", async (req, res) => {
         : [];
 
       if (casterIds.length) {
-        const placeholders = casterIds.map(() => "?").join(",");
-        const [casterRows] = await pool.query(
-          `SELECT id, name, photo FROM casters WHERE id IN (${placeholders})`,
+        const [casterRows] = await db.query(
+          `SELECT id, name, photo FROM casters WHERE id IN (${placeholders(casterIds.length)})`,
           casterIds
         );
         casters = casterRows;
@@ -195,9 +195,7 @@ io.on("connection", (socket) => {
 server.listen(port, async () => {
   console.log(`Server listening on port ${port}`);
   try {
-    const connection = await pool.getConnection();
-    await connection.ping();
-    connection.release();
+    await db.ping();
     console.log("Database connection OK");
   } catch (error) {
     console.error("Database connection failed", error);

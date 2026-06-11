@@ -1,12 +1,12 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
 const { uploadHeroImage } = require("../middleware/upload");
 
 const router = express.Router();
 
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT * FROM heroes ORDER BY name ASC");
+    const [rows] = await db.query("SELECT * FROM heroes ORDER BY name ASC");
     res.json(rows);
   } catch (error) {
     console.error("Failed to fetch heroes", error);
@@ -23,8 +23,12 @@ router.post("/", uploadHeroImage.single("image"), async (req, res) => {
 
     const imagePath = req.file ? `/uploads/heroes/${req.file.filename}` : image_path || null;
 
-    const [result] = await pool.query(
-      "INSERT INTO heroes (name, role, lane, image_path) VALUES (?,?,?,?)",
+    const insertSql =
+      db.client === "postgres"
+        ? "INSERT INTO heroes (name, role, lane, image_path) VALUES (?,?,?,?) RETURNING id"
+        : "INSERT INTO heroes (name, role, lane, image_path) VALUES (?,?,?,?)";
+    const [, result] = await db.query(
+      insertSql,
       [name, role || null, lane || null, imagePath]
     );
 
@@ -46,7 +50,7 @@ router.put("/:id", uploadHeroImage.single("image"), async (req, res) => {
     const { id } = req.params;
     const { name, role, lane, image_path } = req.body;
 
-    const [existingRows] = await pool.query("SELECT image_path FROM heroes WHERE id = ?", [id]);
+    const [existingRows] = await db.query("SELECT image_path FROM heroes WHERE id = ?", [id]);
     if (!existingRows.length) {
       return res.status(404).json({ message: "Hero not found" });
     }
@@ -60,7 +64,7 @@ router.put("/:id", uploadHeroImage.single("image"), async (req, res) => {
       nextImagePath = image_path || null;
     }
 
-    await pool.query(
+    await db.query(
       "UPDATE heroes SET name = ?, role = ?, lane = ?, image_path = ? WHERE id = ?",
       [name, role || null, lane || null, nextImagePath, id]
     );
@@ -81,7 +85,7 @@ router.put("/:id", uploadHeroImage.single("image"), async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.query("DELETE FROM heroes WHERE id = ?", [id]);
+    await db.query("DELETE FROM heroes WHERE id = ?", [id]);
     res.status(204).send();
   } catch (error) {
     console.error("Failed to delete hero", error);

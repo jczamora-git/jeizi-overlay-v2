@@ -1,5 +1,6 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
+const { placeholders } = require("../db/sql");
 const {
   getMaxGamesByMode,
   recalculateMatchSeriesState,
@@ -9,7 +10,7 @@ const router = express.Router();
 
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await pool.query(
+    const [rows] = await db.query(
       "SELECT g.id, g.match_id, g.game_no, g.map_id, g.status, g.winner_team_id, g.finished_at, g.updated_at, " +
         "m.match_no, m.title AS match_title, m.blue_team_id, m.red_team_id, " +
         "m.mode, m.series_completed, m.series_winner_team_id, " +
@@ -31,7 +32,7 @@ router.get("/", async (req, res) => {
 
 router.get("/current", async (req, res) => {
   try {
-    const [matchRows] = await pool.query(
+    const [matchRows] = await db.query(
       "SELECT * FROM matches WHERE status IN ('active','live') ORDER BY queue_order ASC LIMIT 1"
     );
     const match = matchRows[0];
@@ -39,7 +40,7 @@ router.get("/current", async (req, res) => {
       return res.json(null);
     }
 
-    const [gameRows] = await pool.query(
+    const [gameRows] = await db.query(
       "SELECT * FROM games WHERE match_id = ? AND status IN ('setup','drafting','live') ORDER BY game_no ASC LIMIT 1",
       [match.id]
     );
@@ -58,7 +59,7 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "match_id is required" });
     }
 
-    const [matchRows] = await pool.query(
+    const [matchRows] = await db.query(
       "SELECT mode, series_completed FROM matches WHERE id = ?",
       [match_id]
     );
@@ -70,7 +71,7 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "Series already complete." });
     }
 
-    const [countRows] = await pool.query(
+    const [countRows] = await db.query(
       "SELECT COUNT(*) AS game_count FROM games WHERE match_id = ?",
       [match_id]
     );
@@ -83,17 +84,23 @@ router.post("/", async (req, res) => {
 
     let finalGameNo = game_no;
     if (!finalGameNo) {
-      const [rows] = await pool.query(
+      const [rows] = await db.query(
         "SELECT COALESCE(MAX(game_no), 0) + 1 AS next_game_no FROM games WHERE match_id = ?",
         [match_id]
       );
       finalGameNo = rows[0]?.next_game_no || 1;
     }
 
-    const [result] = await pool.query(
-      "INSERT INTO games (match_id, game_no, map_id, status) VALUES (?,?,?,?)",
-      [match_id, finalGameNo, map_id || null, status || "setup"]
-    );
+    const insertSql =
+      db.client === "postgres"
+        ? "INSERT INTO games (match_id, game_no, map_id, status) VALUES (?,?,?,?) RETURNING id"
+        : "INSERT INTO games (match_id, game_no, map_id, status) VALUES (?,?,?,?)";
+    const [, result] = await db.query(insertSql, [
+      match_id,
+      finalGameNo,
+      map_id || null,
+      status || "setup",
+    ]);
 
     const io = req.app.get("io");
     if (io) {
@@ -108,7 +115,7 @@ router.post("/", async (req, res) => {
 });
 
 router.put("/:id", async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   try {
     const { id } = req.params;
     const { match_id, game_no, map_id, status, winner_team_id } = req.body;
@@ -209,12 +216,11 @@ router.put("/:id", async (req, res) => {
 
       if (liveMatchRows.length) {
         const completedLiveIds = liveMatchRows.map((match) => match.id);
-        const placeholders = completedLiveIds.map(() => "?").join(",");
         await connection.query(
           `UPDATE matches
            SET status = 'finished',
                updated_at = NOW()
-           WHERE id IN (${placeholders})`,
+           WHERE id IN (${placeholders(completedLiveIds.length)})`,
           completedLiveIds
         );
       }
@@ -255,7 +261,7 @@ router.put("/:id", async (req, res) => {
 });
 
 router.put("/:id/set-active", async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   try {
     const { id } = req.params;
     await connection.beginTransaction();
@@ -292,7 +298,7 @@ router.put("/:id/set-active", async (req, res) => {
 });
 
 router.put("/:id/winner", async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   try {
     const { id } = req.params;
     const { winner_team_id } = req.body;
@@ -341,7 +347,7 @@ router.put("/:id/winner", async (req, res) => {
 });
 
 router.put("/:id/reset-result", async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   try {
     const { id } = req.params;
     await connection.beginTransaction();
@@ -380,14 +386,14 @@ router.put("/:id/reset-result", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const [gameRows] = await pool.query("SELECT match_id FROM games WHERE id = ?", [id]);
+    const [gameRows] = await db.query("SELECT match_id FROM games WHERE id = ?", [id]);
     const game = gameRows[0];
 
     if (!game) {
       return res.status(404).json({ message: "Game not found" });
     }
 
-    await pool.query("DELETE FROM games WHERE id = ?", [id]);
+    await db.query("DELETE FROM games WHERE id = ?", [id]);
     await recalculateMatchSeriesState(game.match_id);
 
     const io = req.app.get("io");

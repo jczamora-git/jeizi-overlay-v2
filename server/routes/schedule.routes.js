@@ -1,5 +1,5 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
 
 const router = express.Router();
 
@@ -48,7 +48,7 @@ function getTitleSortWeight(title) {
 
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await pool.query(
+    const [rows] = await db.query(
       `SELECT
          m.id,
          m.match_no,

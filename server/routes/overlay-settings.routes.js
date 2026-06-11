@@ -1,5 +1,6 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
+const { placeholders } = require("../db/sql");
 
 const router = express.Router();
 
@@ -8,9 +9,8 @@ const allowedKeySet = new Set(allowedKeys);
 
 router.get("/", async (req, res) => {
   try {
-    const placeholders = allowedKeys.map(() => "?").join(",");
-    const [rows] = await pool.query(
-      `SELECT overlay_key, is_enabled FROM overlay_settings WHERE overlay_key IN (${placeholders})`,
+    const [rows] = await db.query(
+      `SELECT overlay_key, is_enabled FROM overlay_settings WHERE overlay_key IN (${placeholders(allowedKeys.length)})`,
       allowedKeys
     );
 
@@ -44,7 +44,7 @@ router.put("/:overlayKey", async (req, res) => {
       return res.status(400).json({ message: "is_enabled must be a boolean" });
     }
 
-    const [result] = await pool.query(
+    const [, result] = await db.query(
       "UPDATE overlay_settings SET is_enabled = ?, updated_at = NOW() WHERE overlay_key = ?",
       [isEnabled ? 1 : 0, overlayKey]
     );

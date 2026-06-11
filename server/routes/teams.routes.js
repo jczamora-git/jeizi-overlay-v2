@@ -1,12 +1,13 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
+const { placeholders } = require("../db/sql");
 const { uploadTeamLogo } = require("../middleware/upload");
 
 const router = express.Router();
 
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT * FROM teams ORDER BY name ASC");
+    const [rows] = await db.query("SELECT * FROM teams ORDER BY name ASC");
     res.json(rows);
   } catch (error) {
     console.error("Failed to fetch teams", error);
@@ -23,8 +24,12 @@ router.post("/", uploadTeamLogo.single("logo"), async (req, res) => {
 
     const logoPath = req.file ? `/uploads/teams/${req.file.filename}` : logo || null;
 
-    const [result] = await pool.query(
-      "INSERT INTO teams (name, shortname, logo) VALUES (?,?,?)",
+    const insertSql =
+      db.client === "postgres"
+        ? "INSERT INTO teams (name, shortname, logo) VALUES (?,?,?) RETURNING id"
+        : "INSERT INTO teams (name, shortname, logo) VALUES (?,?,?)";
+    const [, result] = await db.query(
+      insertSql,
       [name, shortname || null, logoPath]
     );
 
@@ -53,11 +58,11 @@ router.put("/:id", uploadTeamLogo.single("logo"), async (req, res) => {
     } else if (hasLogoField) {
       nextLogo = logo || null;
     } else {
-      const [rows] = await pool.query("SELECT logo FROM teams WHERE id = ?", [id]);
+      const [rows] = await db.query("SELECT logo FROM teams WHERE id = ?", [id]);
       nextLogo = rows[0]?.logo ?? null;
     }
 
-    await pool.query(
+    await db.query(
       "UPDATE teams SET name = ?, shortname = ?, logo = ? WHERE id = ?",
       [name, shortname || null, nextLogo, id]
     );
@@ -75,7 +80,7 @@ router.delete("/:id", async (req, res) => {
     return res.status(400).json({ message: "Invalid team id" });
   }
 
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
 
@@ -97,42 +102,53 @@ router.delete("/:id", async (req, res) => {
     const matchIds = matchRows.map((row) => Number(row.id)).filter(Boolean);
 
     if (matchIds.length) {
-      const matchPlaceholders = matchIds.map(() => "?").join(",");
-
       await connection.query(
         `DELETE FROM draft_actions
          WHERE game_id IN (
-           SELECT id FROM games WHERE match_id IN (${matchPlaceholders})
+           SELECT id FROM games WHERE match_id IN (${placeholders(matchIds.length)})
          )`,
         matchIds
       );
       await connection.query(
-        `DELETE FROM games WHERE match_id IN (${matchPlaceholders})`,
+        `DELETE FROM games WHERE match_id IN (${placeholders(matchIds.length)})`,
         matchIds
       );
       await connection.query(
-        `DELETE FROM matches WHERE id IN (${matchPlaceholders})`,
+        `DELETE FROM matches WHERE id IN (${placeholders(matchIds.length)})`,
         matchIds
       );
     }
 
-    const [playerTableRows] = await connection.query(
-      `SELECT 1
-       FROM information_schema.tables
-       WHERE table_schema = DATABASE()
-         AND table_name = 'players'
-       LIMIT 1`
-    );
+    const playerTableSql =
+      db.client === "postgres"
+        ? `SELECT 1
+           FROM information_schema.tables
+           WHERE table_schema = 'public'
+             AND table_name = 'players'
+           LIMIT 1`
+        : `SELECT 1
+           FROM information_schema.tables
+           WHERE table_schema = DATABASE()
+             AND table_name = 'players'
+           LIMIT 1`;
+    const [playerTableRows] = await connection.query(playerTableSql);
 
     if (playerTableRows.length) {
-      const [playerTeamColumnRows] = await connection.query(
-        `SELECT 1
-         FROM information_schema.columns
-         WHERE table_schema = DATABASE()
-           AND table_name = 'players'
-           AND column_name = 'team_id'
-         LIMIT 1`
-      );
+      const playerColumnSql =
+        db.client === "postgres"
+          ? `SELECT 1
+             FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = 'players'
+               AND column_name = 'team_id'
+             LIMIT 1`
+          : `SELECT 1
+             FROM information_schema.columns
+             WHERE table_schema = DATABASE()
+               AND table_name = 'players'
+               AND column_name = 'team_id'
+             LIMIT 1`;
+      const [playerTeamColumnRows] = await connection.query(playerColumnSql);
 
       if (playerTeamColumnRows.length) {
         await connection.query("DELETE FROM players WHERE team_id = ?", [teamId]);

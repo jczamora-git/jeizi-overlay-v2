@@ -1,5 +1,6 @@
 const express = require("express");
-const { pool } = require("../db");
+const db = require("../db");
+const { placeholders } = require("../db/sql");
 
 const router = express.Router();
 const finishedMatchStatuses = ["finished", "done", "completed"];
@@ -8,11 +9,11 @@ const getTeamLabel = (team) => team?.shortname || team?.short_name || team?.name
 
 router.get("/", async (req, res) => {
   try {
-    const [teams] = await pool.query(
+    const [teams] = await db.query(
       "SELECT id, name, shortname, logo FROM teams ORDER BY name ASC"
     );
 
-    const [finishedGames] = await pool.query(
+    const [finishedGames] = await db.query(
       `SELECT
          g.id,
          g.match_id,
@@ -34,7 +35,7 @@ router.get("/", async (req, res) => {
          AND g.winner_team_id IS NOT NULL`
     );
 
-    const [seriesCompletedMatches] = await pool.query(
+    const [seriesCompletedMatches] = await db.query(
       `SELECT
          id,
          match_no,
@@ -55,8 +56,7 @@ router.get("/", async (req, res) => {
          AND series_winner_team_id IS NOT NULL`
     );
 
-    const finishedPlaceholders = finishedMatchStatuses.map(() => "?").join(",");
-    const [recentMatchesSource] = await pool.query(
+    const [recentMatchesSource] = await db.query(
       `SELECT
          id,
          match_no,
@@ -73,8 +73,8 @@ router.get("/", async (req, res) => {
          series_winner_team_id,
          series_completed_at
        FROM matches
-       WHERE series_completed = 1
-          OR LOWER(status) IN (${finishedPlaceholders})
+         WHERE series_completed = 1
+          OR LOWER(status) IN (${placeholders(finishedMatchStatuses.length)})
        ORDER BY
          series_completed_at DESC,
          updated_at DESC,
